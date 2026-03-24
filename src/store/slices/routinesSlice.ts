@@ -34,7 +34,21 @@ const routinesSlice = createSlice({
     setGoalStatus(state, action: PayloadAction<{ goalId: string; date: string; status: boolean | null }>) {
       const { goalId, date, status } = action.payload;
       const entry = state.entries.find((e) => e.goalId === goalId && e.date === date);
-      if (entry) entry.completed = status;
+      if (entry) {
+        entry.completed = status;
+      } else {
+        // Entry missing (e.g. goal added after app start) — create it on the fly
+        const goal = state.goals.find((g) => g.id === goalId);
+        if (goal) {
+          state.entries.push({
+            id: `entry-${goalId}-${date}`,
+            goalId,
+            routineId: goal.routineId,
+            date,
+            completed: status,
+          });
+        }
+      }
     },
 
     // ── Routine CRUD ────────────────────────────────────────────────
@@ -75,6 +89,15 @@ const routinesSlice = createSlice({
       state.goals.push(goal);
       const routine = state.routines.find((r) => r.id === goal.routineId);
       if (routine) routine.goalIds.push(id);
+      // Seed an entry for today so the home screen can interact with it immediately
+      const today = new Date().toISOString().split('T')[0];
+      state.entries.push({
+        id: `entry-${id}-${today}`,
+        goalId: id,
+        routineId: goal.routineId,
+        date: today,
+        completed: null,
+      });
     },
 
     updateGoal(state, action: PayloadAction<Goal>) {
