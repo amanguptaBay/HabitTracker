@@ -1,23 +1,33 @@
+import 'react-native-gesture-handler';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView, StyleSheet } from 'react-native';
 import { Provider } from 'react-redux';
 import { store } from './src/store';
 import HomeScreen from './src/screens/HomeScreen';
+import ManageScreen from './src/screens/ManageScreen';
+import { RootStackParamList } from './src/navigation/types';
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   return (
     <Provider store={store}>
-      <SafeAreaView style={styles.container}>
+      <NavigationContainer>
         <StatusBar style="auto" />
-        <HomeScreen />
-      </SafeAreaView>
+        <Stack.Navigator>
+          <Stack.Screen
+            name="Home"
+            component={HomeScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="Manage"
+            component={ManageScreen}
+            options={{ title: 'Manage Routines', headerBackTitle: 'Back' }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
     </Provider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-});
