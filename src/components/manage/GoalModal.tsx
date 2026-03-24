@@ -25,15 +25,15 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
   const [name, setName] = useState('');
   const [successCriteria, setSuccessCriteria] = useState('');
   const [required, setRequired] = useState(true);
-
   const [routineId, setRoutineId] = useState(defaultRoutineId ?? routines[0]?.id ?? '');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
+  // Re-seed state whenever the modal opens or the incoming goal/defaultRoutineId changes
   useEffect(() => {
     if (goal) {
       setName(goal.name);
       setSuccessCriteria(goal.successCriteria ?? '');
       setRequired(goal.required);
-
       setRoutineId(goal.routineId);
     } else {
       setName('');
@@ -41,7 +41,8 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
       setRequired(true);
       setRoutineId(defaultRoutineId ?? routines[0]?.id ?? '');
     }
-  }, [goal, visible]);
+    setDropdownOpen(false);
+  }, [goal, visible, defaultRoutineId]);
 
   const handleSave = () => {
     if (!name.trim() || !routineId) return;
@@ -50,11 +51,12 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
       name: name.trim(),
       successCriteria: successCriteria.trim() || undefined,
       required,
-
       routineId,
     });
     onClose();
   };
+
+  const selectedRoutineName = routines.find((r) => r.id === routineId)?.name ?? 'Select routine…';
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -84,19 +86,35 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
               />
 
               <Text style={styles.label}>Routine</Text>
-              <View style={styles.pillRow}>
-                {routines.map((r) => (
-                  <Pressable
-                    key={r.id}
-                    onPress={() => setRoutineId(r.id)}
-                    style={[styles.pill, routineId === r.id && styles.pillActive]}
-                  >
-                    <Text style={[styles.pillText, routineId === r.id && styles.pillTextActive]}>
-                      {r.name}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
+              {/* Dropdown trigger */}
+              <Pressable
+                style={[styles.dropdown, dropdownOpen && styles.dropdownOpen]}
+                onPress={() => setDropdownOpen((o) => !o)}
+              >
+                <Text style={styles.dropdownValue}>{selectedRoutineName}</Text>
+                <Text style={styles.dropdownChevron}>{dropdownOpen ? '▲' : '▼'}</Text>
+              </Pressable>
+              {/* Dropdown options */}
+              {dropdownOpen && (
+                <View style={styles.dropdownList}>
+                  {routines.map((r, i) => (
+                    <Pressable
+                      key={r.id}
+                      style={[
+                        styles.dropdownOption,
+                        r.id === routineId && styles.dropdownOptionActive,
+                        i < routines.length - 1 && styles.dropdownOptionBorder,
+                      ]}
+                      onPress={() => { setRoutineId(r.id); setDropdownOpen(false); }}
+                    >
+                      <Text style={[styles.dropdownOptionText, r.id === routineId && styles.dropdownOptionTextActive]}>
+                        {r.name}
+                      </Text>
+                      {r.id === routineId && <Text style={styles.dropdownCheck}>✓</Text>}
+                    </Pressable>
+                  ))}
+                </View>
+              )}
 
               <Text style={styles.label}>Options</Text>
               <View style={styles.toggleRow}>
@@ -175,30 +193,65 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1a1a1a',
   },
-  pillRow: {
+  dropdown: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderWidth: 1.5,
-    borderColor: 'transparent',
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
   },
-  pillActive: {
-    backgroundColor: '#e8f5e9',
+  dropdownOpen: {
     borderColor: '#4CAF50',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
-  pillText: {
-    fontSize: 14,
-    color: '#555',
+  dropdownValue: {
+    fontSize: 15,
+    color: '#1a1a1a',
     fontWeight: '500',
   },
-  pillTextActive: {
+  dropdownChevron: {
+    fontSize: 11,
+    color: '#888',
+  },
+  dropdownList: {
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: '#4CAF50',
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  dropdownOptionBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f0f0f0',
+  },
+  dropdownOptionActive: {
+    backgroundColor: '#f1f8f1',
+  },
+  dropdownOptionText: {
+    fontSize: 15,
+    color: '#555',
+  },
+  dropdownOptionTextActive: {
     color: '#2E7D32',
+    fontWeight: '600',
+  },
+  dropdownCheck: {
+    fontSize: 14,
+    color: '#4CAF50',
     fontWeight: '700',
   },
   toggleRow: {
