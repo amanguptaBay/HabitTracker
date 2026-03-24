@@ -39,7 +39,6 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
       setName('');
       setSuccessCriteria('');
       setRequired(true);
-      setTimeTracked(false);
       setRoutineId(defaultRoutineId ?? routines[0]?.id ?? '');
     }
   }, [goal, visible]);
