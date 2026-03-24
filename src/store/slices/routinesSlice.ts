@@ -122,6 +122,36 @@ const routinesSlice = createSlice({
       goal.routineId = toRoutineId;
       state.entries.filter((e) => e.goalId === goalId).forEach((e) => { e.routineId = toRoutineId; });
     },
+
+    // Single atomic action for applying a full drag-reorder result from the flat list.
+    // routineOrder: new ordered routine IDs; routineGoals: map of routineId → ordered goalIds
+    applyDragResult(
+      state,
+      action: PayloadAction<{ routineOrder: string[]; routineGoals: Record<string, string[]> }>
+    ) {
+      const { routineOrder, routineGoals } = action.payload;
+
+      // Re-index routine order
+      routineOrder.forEach((id, index) => {
+        const r = state.routines.find((r) => r.id === id);
+        if (r) r.order = index;
+      });
+
+      // Apply new goalIds per routine, and fix any cross-routine moves
+      for (const [routineId, goalIds] of Object.entries(routineGoals)) {
+        const routine = state.routines.find((r) => r.id === routineId);
+        if (routine) routine.goalIds = goalIds;
+        goalIds.forEach((goalId) => {
+          const goal = state.goals.find((g) => g.id === goalId);
+          if (goal && goal.routineId !== routineId) {
+            goal.routineId = routineId;
+            state.entries
+              .filter((e) => e.goalId === goalId)
+              .forEach((e) => { e.routineId = routineId; });
+          }
+        });
+      }
+    },
   },
 });
 
@@ -136,6 +166,7 @@ export const {
   deleteGoal,
   reorderGoals,
   moveGoal,
+  applyDragResult,
 } = routinesSlice.actions;
 
 export default routinesSlice.reducer;

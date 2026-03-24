@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -14,148 +13,174 @@ import {
   addRoutine,
   updateRoutine,
   deleteRoutine,
-  reorderRoutines,
   addGoal,
   updateGoal,
   deleteGoal,
-  reorderGoals,
+  applyDragResult,
 } from '../store/slices/routinesSlice';
 import { Goal, Routine } from '../types';
 import RoutineModal from '../components/manage/RoutineModal';
 import GoalModal from '../components/manage/GoalModal';
 
+// ─── Flat list item types ─────────────────────────────────────────────────────
+type RoutineItem  = { type: 'routine';  key: string; routine: Routine };
+type GoalItem     = { type: 'goal';     key: string; goal: Goal };
+type AddGoalItem  = { type: 'add-goal'; key: string; routineId: string };
+type FlatItem = RoutineItem | GoalItem | AddGoalItem;
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function ManageScreen() {
-  const dispatch = useAppDispatch();
+  const dispatch  = useAppDispatch();
   const { routines, goals } = useAppSelector((s) => s.routines);
-  const sortedRoutines = [...routines].sort((a, b) => a.order - b.order);
 
   const [routineModal, setRoutineModal] = useState<{ visible: boolean; routine?: Routine | null }>({ visible: false });
   const [goalModal, setGoalModal] = useState<{ visible: boolean; goal?: Goal | null; defaultRoutineId?: string }>({ visible: false });
 
-  const goalsFor = (routine: Routine): Goal[] =>
-    routine.goalIds.map((id) => goals.find((g) => g.id === id)!).filter(Boolean);
+  const sortedRoutines = useMemo(
+    () => [...routines].sort((a, b) => a.order - b.order),
+    [routines],
+  );
 
-  const handleDeleteRoutine = (routine: Routine) => {
+  // Build a single flat array: [Routine header, ...goals, Add-goal button, Routine header, ...]
+  const flatItems = useMemo((): FlatItem[] => {
+    const items: FlatItem[] = [];
+    for (const routine of sortedRoutines) {
+      items.push({ type: 'routine', key: `r-${routine.id}`, routine });
+      routine.goalIds
+        .map((id) => goals.find((g) => g.id === id)!)
+        .filter(Boolean)
+        .forEach((goal) => items.push({ type: 'goal', key: `g-${goal.id}`, goal }));
+      items.push({ type: 'add-goal', key: `add-${routine.id}`, routineId: routine.id });
+    }
+    return items;
+  }, [sortedRoutines, goals]);
+
+  // ── Drag end: walk the new order and rebuild routine/goal assignments ────────
+  const handleDragEnd = ({ data }: { data: FlatItem[] }) => {
+    const routineOrder: string[] = [];
+    const routineGoals: Record<string, string[]> = {};
+    let currentRoutineId: string | null = null;
+
+    for (const item of data) {
+      if (item.type === 'routine') {
+        currentRoutineId = item.routine.id;
+        routineOrder.push(currentRoutineId);
+        routineGoals[currentRoutineId] = [];
+      } else if (item.type === 'goal' && currentRoutineId) {
+        routineGoals[currentRoutineId].push(item.goal.id);
+      }
+      // 'add-goal' items are skipped — they're static UI only
+    }
+
+    dispatch(applyDragResult({ routineOrder, routineGoals }));
+  };
+
+  // ── Delete helpers ───────────────────────────────────────────────────────────
+  const handleDeleteRoutine = (routine: Routine) =>
     Alert.alert(
       `Delete "${routine.name}"?`,
       'This will also delete all habits in this routine.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: () => dispatch(deleteRoutine(routine.id)) },
-      ]
+      ],
     );
-  };
 
-  const handleDeleteGoal = (goal: Goal) => {
+  const handleDeleteGoal = (goal: Goal) =>
     Alert.alert(
       `Delete "${goal.name}"?`,
       undefined,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: () => dispatch(deleteGoal(goal.id)) },
-      ]
-    );
-  };
-
-  const renderGoalItem = (routineId: string) =>
-    ({ item, drag, isActive }: RenderItemParams<Goal>) => (
-      <ScaleDecorator>
-        <Pressable
-          onLongPress={drag}
-          delayLongPress={150}
-          style={[styles.goalRow, isActive && styles.goalRowActive]}
-        >
-          <Text style={styles.dragHandle}>☰</Text>
-          <View style={styles.goalInfo}>
-            <Text style={styles.goalName}>{item.name}</Text>
-            {!item.required && <Text style={styles.optionalBadge}>optional</Text>}
-          </View>
-          <View style={styles.goalActions}>
-            <Pressable
-              hitSlop={8}
-              onPress={() => setGoalModal({ visible: true, goal: item })}
-            >
-              <Text style={styles.actionIcon}>✏️</Text>
-            </Pressable>
-            <Pressable hitSlop={8} onPress={() => handleDeleteGoal(item)}>
-              <Text style={styles.actionIcon}>🗑️</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </ScaleDecorator>
+      ],
     );
 
-  const renderRoutineItem = ({ item: routine, drag, isActive }: RenderItemParams<Routine>) => {
-    const routineGoals = goalsFor(routine);
-    return (
-      <ScaleDecorator>
-        <View style={[styles.routineCard, isActive && styles.routineCardActive]}>
-          {/* Routine header */}
-          <View style={styles.routineHeader}>
-            <Pressable onLongPress={drag} delayLongPress={150} hitSlop={8}>
-              <Text style={styles.dragHandle}>☰</Text>
-            </Pressable>
-            <Text style={styles.routineName}>{routine.name}</Text>
-            <View style={styles.routineActions}>
-              <Pressable
-                hitSlop={8}
-                onPress={() => setRoutineModal({ visible: true, routine })}
-              >
+  // ── Render each flat item ────────────────────────────────────────────────────
+  const renderItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
+    // ── Routine header ────────────────────────────────────────────────────────
+    if (item.type === 'routine') {
+      return (
+        <ScaleDecorator>
+          <Pressable
+            onLongPress={drag}
+            delayLongPress={200}
+            style={[styles.routineHeader, isActive && styles.activeRow]}
+          >
+            <Text style={styles.dragHandle}>☰</Text>
+            <Text style={styles.routineName}>{item.routine.name}</Text>
+            <View style={styles.rowActions}>
+              <Pressable hitSlop={10} onPress={() => setRoutineModal({ visible: true, routine: item.routine })}>
                 <Text style={styles.actionIcon}>✏️</Text>
               </Pressable>
-              <Pressable hitSlop={8} onPress={() => handleDeleteRoutine(routine)}>
+              <Pressable hitSlop={10} onPress={() => handleDeleteRoutine(item.routine)}>
                 <Text style={styles.actionIcon}>🗑️</Text>
               </Pressable>
             </View>
-          </View>
-
-          {/* Goals within routine */}
-          {routineGoals.length > 0 && (
-            <View style={styles.goalsContainer}>
-              <DraggableFlatList
-                data={routineGoals}
-                keyExtractor={(g) => g.id}
-                renderItem={renderGoalItem(routine.id)}
-                onDragEnd={({ data }) =>
-                  dispatch(reorderGoals({ routineId: routine.id, goalIds: data.map((g) => g.id) }))
-                }
-                scrollEnabled={false}
-              />
-            </View>
-          )}
-
-          {/* Add habit button */}
-          <Pressable
-            style={styles.addHabitBtn}
-            onPress={() => setGoalModal({ visible: true, goal: null, defaultRoutineId: routine.id })}
-          >
-            <Text style={styles.addHabitText}>+ Add Habit</Text>
           </Pressable>
-        </View>
-      </ScaleDecorator>
+        </ScaleDecorator>
+      );
+    }
+
+    // ── Goal row ──────────────────────────────────────────────────────────────
+    if (item.type === 'goal') {
+      return (
+        <ScaleDecorator>
+          <Pressable
+            onLongPress={drag}
+            delayLongPress={200}
+            style={[styles.goalRow, isActive && styles.activeRow]}
+          >
+            <Text style={styles.dragHandle}>⠿</Text>
+            <View style={styles.goalInfo}>
+              <Text style={styles.goalName}>{item.goal.name}</Text>
+              {!item.goal.required && <Text style={styles.optionalBadge}>optional</Text>}
+            </View>
+            <View style={styles.rowActions}>
+              <Pressable hitSlop={10} onPress={() => setGoalModal({ visible: true, goal: item.goal })}>
+                <Text style={styles.actionIcon}>✏️</Text>
+              </Pressable>
+              <Pressable hitSlop={10} onPress={() => handleDeleteGoal(item.goal)}>
+                <Text style={styles.actionIcon}>🗑️</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </ScaleDecorator>
+      );
+    }
+
+    // ── Add-habit row (not draggable — drag is never called) ──────────────────
+    return (
+      <Pressable
+        style={styles.addGoalRow}
+        onPress={() => setGoalModal({ visible: true, goal: null, defaultRoutineId: item.routineId })}
+      >
+        <Text style={styles.addGoalText}>＋ Add Habit</Text>
+      </Pressable>
     );
   };
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.container}>
         <DraggableFlatList
-          data={sortedRoutines}
-          keyExtractor={(r) => r.id}
-          renderItem={renderRoutineItem}
-          onDragEnd={({ data }) => dispatch(reorderRoutines(data.map((r) => r.id)))}
+          data={flatItems}
+          keyExtractor={(item) => item.key}
+          renderItem={renderItem}
+          onDragEnd={handleDragEnd}
+          activationDistance={10}
           contentContainerStyle={styles.listContent}
           ListFooterComponent={
             <Pressable
               style={styles.addRoutineBtn}
               onPress={() => setRoutineModal({ visible: true, routine: null })}
             >
-              <Text style={styles.addRoutineText}>+ Add Routine</Text>
+              <Text style={styles.addRoutineText}>＋ Add Routine</Text>
             </Pressable>
           }
         />
 
-        {/* Routine modal */}
         <RoutineModal
           visible={routineModal.visible}
           routine={routineModal.routine}
@@ -169,7 +194,6 @@ export default function ManageScreen() {
           onClose={() => setRoutineModal({ visible: false })}
         />
 
-        {/* Goal modal */}
         <GoalModal
           visible={goalModal.visible}
           goal={goalModal.goal}
@@ -189,115 +213,118 @@ export default function ManageScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
   listContent: {
-    padding: 16,
-    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    gap: 2,
   },
-  routineCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    marginBottom: 12,
-  },
-  routineCardActive: {
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 8,
-  },
+
+  // Routine header row
   routineHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
     gap: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginTop: 14,
   },
   routineName: {
     flex: 1,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: '#fff',
+    letterSpacing: 0.3,
   },
-  routineActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  goalsContainer: {
-    paddingHorizontal: 8,
-    paddingTop: 4,
-  },
+
+  // Goal row
   goalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
     gap: 10,
-    borderRadius: 8,
-  },
-  goalRowActive: {
-    backgroundColor: '#f8f8f8',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f0f0f0',
   },
   goalInfo: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexWrap: 'wrap',
   },
   goalName: {
     fontSize: 15,
+    color: '#1a1a1a',
     fontWeight: '500',
-    color: '#333',
   },
   optionalBadge: {
     fontSize: 11,
     color: '#aaa',
     fontStyle: 'italic',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f5f5f5',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
-  goalActions: {
-    flexDirection: 'row',
-    gap: 10,
+
+  // Active drag state (applies to both)
+  activeRow: {
+    opacity: 0.92,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    borderRadius: 10,
   },
+
+  // Add habit row
+  addGoalRow: {
+    backgroundColor: '#fff',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+  },
+  addGoalText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+    textAlign: 'center',
+  },
+
+  // Shared
   dragHandle: {
     fontSize: 16,
-    color: '#ccc',
+    color: '#bbb',
+    width: 20,
+    textAlign: 'center',
+  },
+  rowActions: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
   },
   actionIcon: {
     fontSize: 15,
   },
-  addHabitBtn: {
-    padding: 14,
-    alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#f0f0f0',
-  },
-  addHabitText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
+
+  // Add routine footer
   addRoutineBtn: {
-    marginTop: 4,
+    marginTop: 20,
     padding: 16,
     backgroundColor: '#fff',
-    borderRadius: 14,
+    borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1.5,
     borderColor: '#e0e0e0',
