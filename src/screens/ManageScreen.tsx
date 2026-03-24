@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, TouchableOpacity } from 'react-native-gesture-handler';
 import { useAppDispatch, useAppSelector } from '../store';
 import {
   addRoutine,
@@ -164,12 +164,12 @@ export default function ManageScreen() {
             <Text style={styles.dragHandle}>☰</Text>
             <Text style={styles.routineName}>{item.routine.name}</Text>
             <View style={styles.rowActions}>
-              <Pressable hitSlop={10} onPress={() => setRoutineModal({ visible: true, routine: item.routine })}>
+              <TouchableOpacity hitSlop={10} onPress={() => setRoutineModal({ visible: true, routine: item.routine })}>
                 <Text style={styles.actionIcon}>✏️</Text>
-              </Pressable>
-              <Pressable hitSlop={10} onPress={() => handleDeleteRoutine(item.routine)}>
+              </TouchableOpacity>
+              <TouchableOpacity hitSlop={10} onPress={() => handleDeleteRoutine(item.routine)}>
                 <Text style={styles.actionIcon}>🗑️</Text>
-              </Pressable>
+              </TouchableOpacity>
             </View>
           </Pressable>
         </ScaleDecorator>
@@ -191,12 +191,12 @@ export default function ManageScreen() {
               {!item.goal.required && <Text style={styles.optionalBadge}>optional</Text>}
             </View>
             <View style={styles.rowActions}>
-              <Pressable hitSlop={10} onPress={() => setGoalModal({ visible: true, goal: item.goal })}>
+              <TouchableOpacity hitSlop={10} onPress={() => setGoalModal({ visible: true, goal: item.goal })}>
                 <Text style={styles.actionIcon}>✏️</Text>
-              </Pressable>
-              <Pressable hitSlop={10} onPress={() => handleDeleteGoal(item.goal)}>
+              </TouchableOpacity>
+              <TouchableOpacity hitSlop={10} onPress={() => handleDeleteGoal(item.goal)}>
                 <Text style={styles.actionIcon}>🗑️</Text>
-              </Pressable>
+              </TouchableOpacity>
             </View>
           </Pressable>
         </ScaleDecorator>
