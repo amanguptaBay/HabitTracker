@@ -64,14 +64,19 @@ const routinesSlice = createSlice({
     },
 
     deleteRoutine(state, action: PayloadAction<string>) {
-      const routine = state.routines.find((r) => r.id === action.payload);
-      if (!routine) return;
-      // Remove all goals + their entries
-      routine.goalIds.forEach((goalId) => {
-        state.goals = state.goals.filter((g) => g.id !== goalId);
-        state.entries = state.entries.filter((e) => e.goalId !== goalId);
-      });
-      state.routines = state.routines.filter((r) => r.id !== action.payload);
+      const routineIdx = state.routines.findIndex((r) => r.id === action.payload);
+      if (routineIdx === -1) return;
+      const goalIdSet = new Set(state.routines[routineIdx].goalIds);
+      // Remove entries belonging to any goal in this routine
+      for (let i = state.entries.length - 1; i >= 0; i--) {
+        if (goalIdSet.has(state.entries[i].goalId)) state.entries.splice(i, 1);
+      }
+      // Remove the goals themselves
+      for (let i = state.goals.length - 1; i >= 0; i--) {
+        if (goalIdSet.has(state.goals[i].id)) state.goals.splice(i, 1);
+      }
+      // Remove the routine
+      state.routines.splice(routineIdx, 1);
     },
 
     reorderRoutines(state, action: PayloadAction<string[]>) {
@@ -120,12 +125,22 @@ const routinesSlice = createSlice({
     },
 
     deleteGoal(state, action: PayloadAction<string>) {
-      const goal = state.goals.find((g) => g.id === action.payload);
-      if (!goal) return;
-      state.goals = state.goals.filter((g) => g.id !== action.payload);
-      state.entries = state.entries.filter((e) => e.goalId !== action.payload);
-      const routine = state.routines.find((r) => r.id === goal.routineId);
-      if (routine) routine.goalIds = routine.goalIds.filter((id) => id !== action.payload);
+      const goalId = action.payload;
+      const goalIdx = state.goals.findIndex((g) => g.id === goalId);
+      if (goalIdx === -1) return;
+      const routineId = state.goals[goalIdx].routineId;
+      // Remove the goal
+      state.goals.splice(goalIdx, 1);
+      // Remove its entries
+      for (let i = state.entries.length - 1; i >= 0; i--) {
+        if (state.entries[i].goalId === goalId) state.entries.splice(i, 1);
+      }
+      // Remove from its routine's goalIds
+      const routine = state.routines.find((r) => r.id === routineId);
+      if (routine) {
+        const gIdx = routine.goalIds.indexOf(goalId);
+        if (gIdx !== -1) routine.goalIds.splice(gIdx, 1);
+      }
     },
 
     reorderGoals(state, action: PayloadAction<{ routineId: string; goalIds: string[] }>) {

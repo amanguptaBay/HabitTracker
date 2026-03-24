@@ -1,6 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -130,25 +129,8 @@ export default function ManageScreen() {
   };
 
   // ── Delete helpers ───────────────────────────────────────────────────────────
-  const handleDeleteRoutine = (routine: Routine) =>
-    Alert.alert(
-      `Delete "${routine.name}"?`,
-      'This will also delete all habits in this routine.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => dispatch(deleteRoutine(routine.id)) },
-      ],
-    );
-
-  const handleDeleteGoal = (goal: Goal) =>
-    Alert.alert(
-      `Delete "${goal.name}"?`,
-      undefined,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => dispatch(deleteGoal(goal.id)) },
-      ],
-    );
+  const handleDeleteRoutine = (routine: Routine) => dispatch(deleteRoutine(routine.id));
+  const handleDeleteGoal    = (goal: Goal)        => dispatch(deleteGoal(goal.id));
 
   // ── Render each flat item ────────────────────────────────────────────────────
   const renderItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
