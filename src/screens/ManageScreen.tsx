@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -55,13 +55,67 @@ export default function ManageScreen() {
     return items;
   }, [sortedRoutines, goals]);
 
+  // Track whether a routine header (vs a goal) initiated the current drag
+  const draggingRoutineId = useRef<string | null>(null);
+
+  const handleDragBegin = (index: number) => {
+    const item = flatItems[index];
+    draggingRoutineId.current = item?.type === 'routine' ? item.routine.id : null;
+  };
+
   // ── Drag end: walk the new order and rebuild routine/goal assignments ────────
   const handleDragEnd = ({ data }: { data: FlatItem[] }) => {
+    const routineBeingDragged = draggingRoutineId.current;
+    draggingRoutineId.current = null;
+
+    let processedData = data;
+
+    if (routineBeingDragged) {
+      // When a routine header is dragged, DraggableFlatList only moves that
+      // single item — its goal items stay at their original flat-list positions
+      // and get wrongly assigned to whatever routine header now sits above them.
+      //
+      // Fix: strip the routine's own goals from wherever they ended up, then
+      // re-splice them immediately after the routine header in the new order.
+      //
+      // Side-effect (intentional): any goals from OTHER routines that appear
+      // between the routine header and the re-spliced goals remain there,
+      // so dropping a routine "into the middle" of another naturally splits
+      // those goals between the two routines.
+
+      const originalGoalIds = routines.find((r) => r.id === routineBeingDragged)?.goalIds ?? [];
+      const ownGoalIdSet = new Set(originalGoalIds);
+
+      // Collect the routine's goal items in their original order
+      const ownGoalItems = originalGoalIds
+        .map((id) => data.find((item): item is GoalItem => item.type === 'goal' && item.goal.id === id))
+        .filter((item): item is GoalItem => item !== undefined);
+
+      // Remove own goals from wherever they are in the reordered list
+      const stripped = data.filter(
+        (item) => item.type !== 'goal' || !ownGoalIdSet.has(item.goal.id),
+      );
+
+      // Re-insert them right after the routine header
+      const headerIdx = stripped.findIndex(
+        (item) => item.type === 'routine' && item.routine.id === routineBeingDragged,
+      );
+
+      if (headerIdx >= 0) {
+        processedData = [
+          ...stripped.slice(0, headerIdx + 1),
+          ...ownGoalItems,
+          ...stripped.slice(headerIdx + 1),
+        ];
+      }
+    }
+
+    // Standard reconstruction: walk the (possibly adjusted) order and assign goals to routines
     const routineOrder: string[] = [];
     const routineGoals: Record<string, string[]> = {};
     let currentRoutineId: string | null = null;
 
-    for (const item of data) {
+    for (const item of processedData) {
       if (item.type === 'routine') {
         currentRoutineId = item.routine.id;
         routineOrder.push(currentRoutineId);
@@ -168,6 +222,7 @@ export default function ManageScreen() {
           data={flatItems}
           keyExtractor={(item) => item.key}
           renderItem={renderItem}
+          onDragBegin={handleDragBegin}
           onDragEnd={handleDragEnd}
           activationDistance={10}
           contentContainerStyle={styles.listContent}
