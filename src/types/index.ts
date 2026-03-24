@@ -5,7 +5,6 @@ export interface Goal {
   description?: string;
   successCriteria?: string;
   required: boolean;
-  timeTracked: boolean;
 }
 
 export interface Routine {
@@ -21,7 +20,6 @@ export interface Entry {
   routineId: string;
   date: string; // YYYY-MM-DD
   completed: boolean | null; // null = no response, true = done, false = intentionally failed
-  timeSpent: number; // minutes
   notes?: string;
 }
 

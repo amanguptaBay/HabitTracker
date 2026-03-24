@@ -9,16 +9,16 @@ const initialState: RoutinesState = {
     { id: 'routine-night', name: 'Night', order: 1, goalIds: ['goal-night-brush', 'goal-night-meditation', 'goal-night-no-screens'] },
   ],
   goals: [
-    { id: 'goal-morning-brush', routineId: 'routine-morning', name: 'Brush Teeth', successCriteria: 'Brushed teeth', required: true, timeTracked: false },
-    { id: 'goal-night-brush', routineId: 'routine-night', name: 'Brush Teeth', successCriteria: 'Brushed teeth', required: true, timeTracked: false },
-    { id: 'goal-night-meditation', routineId: 'routine-night', name: 'Meditation', successCriteria: 'Completed meditation session', required: true, timeTracked: true },
-    { id: 'goal-night-no-screens', routineId: 'routine-night', name: '90 Min No Screens', successCriteria: '90 minutes without screens before bed', required: false, timeTracked: false },
+    { id: 'goal-morning-brush', routineId: 'routine-morning', name: 'Brush Teeth', successCriteria: 'Brushed teeth', required: true},
+    { id: 'goal-night-brush', routineId: 'routine-night', name: 'Brush Teeth', successCriteria: 'Brushed teeth', required: true},
+    { id: 'goal-night-meditation', routineId: 'routine-night', name: 'Meditation', successCriteria: 'Completed meditation session', required: true},
+    { id: 'goal-night-no-screens', routineId: 'routine-night', name: '90 Min No Screens', successCriteria: '90 minutes without screens before bed', required: false},
   ],
   entries: [
-    { id: `entry-morning-brush-${today}`, goalId: 'goal-morning-brush', routineId: 'routine-morning', date: today, completed: null, timeSpent: 0 },
-    { id: `entry-night-brush-${today}`, goalId: 'goal-night-brush', routineId: 'routine-night', date: today, completed: null, timeSpent: 0 },
-    { id: `entry-night-meditation-${today}`, goalId: 'goal-night-meditation', routineId: 'routine-night', date: today, completed: null, timeSpent: 0 },
-    { id: `entry-night-no-screens-${today}`, goalId: 'goal-night-no-screens', routineId: 'routine-night', date: today, completed: null, timeSpent: 0 },
+    { id: `entry-morning-brush-${today}`, goalId: 'goal-morning-brush', routineId: 'routine-morning', date: today, completed: null},
+    { id: `entry-night-brush-${today}`, goalId: 'goal-night-brush', routineId: 'routine-night', date: today, completed: null},
+    { id: `entry-night-meditation-${today}`, goalId: 'goal-night-meditation', routineId: 'routine-night', date: today, completed: null},
+    { id: `entry-night-no-screens-${today}`, goalId: 'goal-night-no-screens', routineId: 'routine-night', date: today, completed: null},
   ],
 };
 

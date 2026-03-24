@@ -25,7 +25,7 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
   const [name, setName] = useState('');
   const [successCriteria, setSuccessCriteria] = useState('');
   const [required, setRequired] = useState(true);
-  const [timeTracked, setTimeTracked] = useState(false);
+
   const [routineId, setRoutineId] = useState(defaultRoutineId ?? routines[0]?.id ?? '');
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
       setName(goal.name);
       setSuccessCriteria(goal.successCriteria ?? '');
       setRequired(goal.required);
-      setTimeTracked(goal.timeTracked);
+
       setRoutineId(goal.routineId);
     } else {
       setName('');
@@ -51,7 +51,7 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
       name: name.trim(),
       successCriteria: successCriteria.trim() || undefined,
       required,
-      timeTracked,
+
       routineId,
     });
     onClose();
@@ -107,14 +107,6 @@ export default function GoalModal({ visible, goal, routines, defaultRoutineId, o
                 >
                   <Text style={[styles.toggleText, required && styles.toggleTextActive]}>
                     Required
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setTimeTracked(!timeTracked)}
-                  style={[styles.toggle, timeTracked && styles.toggleActive]}
-                >
-                  <Text style={[styles.toggleText, timeTracked && styles.toggleTextActive]}>
-                    Track Time
                   </Text>
                 </Pressable>
               </View>
