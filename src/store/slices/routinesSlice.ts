@@ -1,9 +1,13 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { RoutinesState, Goal, Routine } from '../../types';
+import { RoutinesState, Goal, Routine, TimingSegment } from '../../types';
 
 const today = new Date().toISOString().split('T')[0];
 
+const MERGE_GAP_MS = 60_000; // segments < 1 min apart get merged
+
 const initialState: RoutinesState = {
+  timingSegments: [],
+  activeTimers: [],
   routines: [
     { id: 'routine-morning', name: 'Morning', order: 0, goalIds: ['goal-morning-brush'] },
     { id: 'routine-night', name: 'Night', order: 1, goalIds: ['goal-night-brush', 'goal-night-meditation', 'goal-night-no-screens'] },
@@ -161,6 +165,54 @@ const routinesSlice = createSlice({
       state.entries.filter((e) => e.goalId === goalId).forEach((e) => { e.routineId = toRoutineId; });
     },
 
+    // ── Timers ──────────────────────────────────────────────────────
+    startTimer(
+      state,
+      action: PayloadAction<{ targetId: string; targetType: 'goal' | 'routine' }>
+    ) {
+      const { targetId, targetType } = action.payload;
+      if (state.activeTimers.find((t) => t.targetId === targetId)) return; // already running
+      state.activeTimers.push({ targetId, targetType, startedAt: new Date().toISOString() });
+    },
+
+    stopTimer(state, action: PayloadAction<{ targetId: string }>) {
+      const { targetId } = action.payload;
+      const timerIdx = state.activeTimers.findIndex((t) => t.targetId === targetId);
+      if (timerIdx === -1) return;
+
+      const timer = state.activeTimers[timerIdx];
+      const now = new Date();
+      const startTime = timer.startedAt;
+      const endTime = now.toISOString();
+      const durationMs = now.getTime() - new Date(startTime).getTime();
+      const date = startTime.split('T')[0];
+
+      // Find the last segment for this target on this date — merge if gap is small
+      const todaySegments = state.timingSegments.filter(
+        (s) => s.targetId === targetId && s.date === date
+      );
+      const last = todaySegments[todaySegments.length - 1] as TimingSegment | undefined;
+      const gapMs = last ? new Date(startTime).getTime() - new Date(last.endTime).getTime() : Infinity;
+
+      if (last && gapMs < MERGE_GAP_MS) {
+        // Merge: extend the existing segment
+        last.endTime = endTime;
+        last.durationMs += durationMs + gapMs;
+      } else {
+        state.timingSegments.push({
+          id: uid(),
+          targetId,
+          targetType: timer.targetType,
+          date,
+          startTime,
+          endTime,
+          durationMs,
+        });
+      }
+
+      state.activeTimers.splice(timerIdx, 1);
+    },
+
     // Single atomic action for applying a full drag-reorder result from the flat list.
     // routineOrder: new ordered routine IDs; routineGoals: map of routineId → ordered goalIds
     applyDragResult(
@@ -205,6 +257,8 @@ export const {
   reorderGoals,
   moveGoal,
   applyDragResult,
+  startTimer,
+  stopTimer,
 } = routinesSlice.actions;
 
 export default routinesSlice.reducer;

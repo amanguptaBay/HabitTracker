@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppSelector, useAppDispatch } from '../store';
-import { setGoalStatus } from '../store/slices/routinesSlice';
+import { setGoalStatus, startTimer, stopTimer } from '../store/slices/routinesSlice';
 import { Goal, Routine } from '../types';
 import GoalCard from '../components/GoalCard';
 import RoutineCard from '../components/RoutineCard';
@@ -16,13 +16,32 @@ type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const dispatch = useAppDispatch();
-  const { routines, goals, entries } = useAppSelector((state) => state.routines);
+  const { routines, goals, entries, timingSegments, activeTimers } = useAppSelector(
+    (state) => state.routines
+  );
 
   const getGoalsForRoutine = (routine: Routine): Goal[] =>
     routine.goalIds.map((id) => goals.find((g) => g.id === id)!).filter(Boolean);
 
   const getEntry = (goalId: string) =>
     entries.find((e) => e.goalId === goalId && e.date === today);
+
+  const getActiveTimer = (goalId: string) =>
+    activeTimers.find((t) => t.targetId === goalId && t.targetType === 'goal') ?? null;
+
+  const getTotalSegmentMs = (goalId: string) =>
+    timingSegments
+      .filter((s) => s.targetId === goalId && s.targetType === 'goal' && s.date === today)
+      .reduce((sum, s) => sum + s.durationMs, 0);
+
+  const handleTimerToggle = (goalId: string) => {
+    const active = getActiveTimer(goalId);
+    if (active) {
+      dispatch(stopTimer({ targetId: goalId }));
+    } else {
+      dispatch(startTimer({ targetId: goalId, targetType: 'goal' }));
+    }
+  };
 
   const getRoutineStatus = (routine: Routine): 'complete' | 'failed' | 'pending' => {
     const required = getGoalsForRoutine(routine).filter((g) => g.required);
@@ -67,6 +86,10 @@ export default function HomeScreen() {
                     onDone={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: true }))}
                     onFail={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: false }))}
                     onClear={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: null }))}
+                    isTimerRunning={!!getActiveTimer(goal.id)}
+                    timerStartedAt={getActiveTimer(goal.id)?.startedAt ?? null}
+                    totalTimerMs={getTotalSegmentMs(goal.id)}
+                    onTimerToggle={() => handleTimerToggle(goal.id)}
                   />
                 );
               })}
