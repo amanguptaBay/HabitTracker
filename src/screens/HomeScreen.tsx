@@ -26,20 +26,37 @@ export default function HomeScreen() {
   const getEntry = (goalId: string) =>
     entries.find((e) => e.goalId === goalId && e.date === today);
 
-  const getActiveTimer = (goalId: string) =>
+  // ── Goal timers ─────────────────────────────────────────────────
+  const getActiveGoalTimer = (goalId: string) =>
     activeTimers.find((t) => t.targetId === goalId && t.targetType === 'goal') ?? null;
 
-  const getTotalSegmentMs = (goalId: string) =>
+  const getGoalSegmentMs = (goalId: string) =>
     timingSegments
       .filter((s) => s.targetId === goalId && s.targetType === 'goal' && s.date === today)
       .reduce((sum, s) => sum + s.durationMs, 0);
 
-  const handleTimerToggle = (goalId: string) => {
-    const active = getActiveTimer(goalId);
-    if (active) {
+  const handleGoalTimerToggle = (goalId: string) => {
+    if (getActiveGoalTimer(goalId)) {
       dispatch(stopTimer({ targetId: goalId }));
     } else {
       dispatch(startTimer({ targetId: goalId, targetType: 'goal' }));
+    }
+  };
+
+  // ── Routine timers ───────────────────────────────────────────────
+  const getActiveRoutineTimer = (routineId: string) =>
+    activeTimers.find((t) => t.targetId === routineId && t.targetType === 'routine') ?? null;
+
+  const getRoutineSegmentMs = (routineId: string) =>
+    timingSegments
+      .filter((s) => s.targetId === routineId && s.targetType === 'routine' && s.date === today)
+      .reduce((sum, s) => sum + s.durationMs, 0);
+
+  const handleRoutineTimerToggle = (routineId: string) => {
+    if (getActiveRoutineTimer(routineId)) {
+      dispatch(stopTimer({ targetId: routineId }));
+    } else {
+      dispatch(startTimer({ targetId: routineId, targetType: 'routine' }));
     }
   };
 
@@ -75,7 +92,15 @@ export default function HomeScreen() {
           const routineGoals = getGoalsForRoutine(routine);
           const status = getRoutineStatus(routine);
           return (
-            <RoutineCard key={routine.id} routine={routine} status={status}>
+            <RoutineCard
+              key={routine.id}
+              routine={routine}
+              status={status}
+              isTimerRunning={!!getActiveRoutineTimer(routine.id)}
+              timerStartedAt={getActiveRoutineTimer(routine.id)?.startedAt ?? null}
+              totalTimerMs={getRoutineSegmentMs(routine.id)}
+              onTimerToggle={() => handleRoutineTimerToggle(routine.id)}
+            >
               {routineGoals.map((goal) => {
                 const entry = getEntry(goal.id);
                 return (
@@ -86,10 +111,10 @@ export default function HomeScreen() {
                     onDone={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: true }))}
                     onFail={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: false }))}
                     onClear={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: null }))}
-                    isTimerRunning={!!getActiveTimer(goal.id)}
-                    timerStartedAt={getActiveTimer(goal.id)?.startedAt ?? null}
-                    totalTimerMs={getTotalSegmentMs(goal.id)}
-                    onTimerToggle={() => handleTimerToggle(goal.id)}
+                    isTimerRunning={!!getActiveGoalTimer(goal.id)}
+                    timerStartedAt={getActiveGoalTimer(goal.id)?.startedAt ?? null}
+                    totalTimerMs={getGoalSegmentMs(goal.id)}
+                    onTimerToggle={() => handleGoalTimerToggle(goal.id)}
                   />
                 );
               })}
