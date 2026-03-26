@@ -7,16 +7,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView, TouchableOpacity } from 'react-native-gesture-handler';
-import { useAppDispatch, useAppSelector } from '../store';
-import {
-  addRoutine,
-  updateRoutine,
-  deleteRoutine,
-  addGoal,
-  updateGoal,
-  deleteGoal,
-  applyDragResult,
-} from '../store/slices/routinesSlice';
+import { useHabitData } from '../context/HabitDataContext';
 import { Goal, Routine } from '../types';
 import RoutineModal from '../components/manage/RoutineModal';
 import GoalModal from '../components/manage/GoalModal';
@@ -27,10 +18,17 @@ type GoalItem     = { type: 'goal';     key: string; goal: Goal };
 type AddGoalItem  = { type: 'add-goal'; key: string; routineId: string };
 type FlatItem = RoutineItem | GoalItem | AddGoalItem;
 
+function uid7() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ManageScreen() {
-  const dispatch  = useAppDispatch();
-  const { routines, goals } = useAppSelector((s) => s.routines);
+  const {
+    routines, goals,
+    addRoutine, updateRoutine, deleteRoutine, reorderAll,
+    addGoal, updateGoal, deleteGoal, moveGoal,
+  } = useHabitData();
 
   const [routineModal, setRoutineModal] = useState<{ visible: boolean; routine?: Routine | null }>({ visible: false });
   const [goalModal, setGoalModal] = useState<{ visible: boolean; goal?: Goal | null; defaultRoutineId?: string }>({ visible: false });
@@ -40,7 +38,7 @@ export default function ManageScreen() {
     [routines],
   );
 
-  // Build a single flat array: [Routine header, ...goals, Add-goal button, Routine header, ...]
+  // Build a single flat array: [Routine header, ...goals, Add-goal button, ...]
   const flatItems = useMemo((): FlatItem[] => {
     const items: FlatItem[] = [];
     for (const routine of sortedRoutines) {
@@ -54,7 +52,6 @@ export default function ManageScreen() {
     return items;
   }, [sortedRoutines, goals]);
 
-  // Track whether a routine header (vs a goal) initiated the current drag
   const draggingRoutineId = useRef<string | null>(null);
 
   const handleDragBegin = (index: number) => {
@@ -62,40 +59,25 @@ export default function ManageScreen() {
     draggingRoutineId.current = item?.type === 'routine' ? item.routine.id : null;
   };
 
-  // ── Drag end: walk the new order and rebuild routine/goal assignments ────────
-  const handleDragEnd = ({ data }: { data: FlatItem[] }) => {
+  // ── Drag end ────────────────────────────────────────────────────────────────
+  const handleDragEnd = async ({ data }: { data: FlatItem[] }) => {
     const routineBeingDragged = draggingRoutineId.current;
     draggingRoutineId.current = null;
 
     let processedData = data;
 
     if (routineBeingDragged) {
-      // When a routine header is dragged, DraggableFlatList only moves that
-      // single item — its goal items stay at their original flat-list positions
-      // and get wrongly assigned to whatever routine header now sits above them.
-      //
-      // Fix: strip the routine's own goals from wherever they ended up, then
-      // re-splice them immediately after the routine header in the new order.
-      //
-      // Side-effect (intentional): any goals from OTHER routines that appear
-      // between the routine header and the re-spliced goals remain there,
-      // so dropping a routine "into the middle" of another naturally splits
-      // those goals between the two routines.
-
       const originalGoalIds = routines.find((r) => r.id === routineBeingDragged)?.goalIds ?? [];
       const ownGoalIdSet = new Set(originalGoalIds);
 
-      // Collect the routine's goal items in their original order
       const ownGoalItems = originalGoalIds
         .map((id) => data.find((item): item is GoalItem => item.type === 'goal' && item.goal.id === id))
         .filter((item): item is GoalItem => item !== undefined);
 
-      // Remove own goals from wherever they are in the reordered list
       const stripped = data.filter(
         (item) => item.type !== 'goal' || !ownGoalIdSet.has(item.goal.id),
       );
 
-      // Re-insert them right after the routine header
       const headerIdx = stripped.findIndex(
         (item) => item.type === 'routine' && item.routine.id === routineBeingDragged,
       );
@@ -109,32 +91,58 @@ export default function ManageScreen() {
       }
     }
 
-    // Standard reconstruction: walk the (possibly adjusted) order and assign goals to routines
-    const routineOrder: string[] = [];
+    // Rebuild routine order + goal assignments from the new flat order
+    const routineOrder: Routine[] = [];
     const routineGoals: Record<string, string[]> = {};
     let currentRoutineId: string | null = null;
 
     for (const item of processedData) {
       if (item.type === 'routine') {
         currentRoutineId = item.routine.id;
-        routineOrder.push(currentRoutineId);
+        routineOrder.push(item.routine);
         routineGoals[currentRoutineId] = [];
       } else if (item.type === 'goal' && currentRoutineId) {
         routineGoals[currentRoutineId].push(item.goal.id);
       }
-      // 'add-goal' items are skipped — they're static UI only
     }
 
-    dispatch(applyDragResult({ routineOrder, routineGoals }));
-  };
+    // Persist new routine order
+    const reordered = routineOrder.map((r, i) => ({ ...r, order: i }));
+    await reorderAll(reordered);
 
-  // ── Delete helpers ───────────────────────────────────────────────────────────
-  const handleDeleteRoutine = (routine: Routine) => dispatch(deleteRoutine(routine.id));
-  const handleDeleteGoal    = (goal: Goal)        => dispatch(deleteGoal(goal.id));
+    // Persist any goal reassignments
+    for (const goal of goals) {
+      const newRoutineId = Object.entries(routineGoals).find(([, ids]) =>
+        ids.includes(goal.id)
+      )?.[0];
+      if (newRoutineId && newRoutineId !== goal.routineId) {
+        await moveGoal(goal.id, goal.routineId, newRoutineId, routineGoals[newRoutineId]);
+      }
+    }
+
+    // Update goal order within each routine
+    for (const [rId, goalIds] of Object.entries(routineGoals)) {
+      const routine = routines.find((r) => r.id === rId);
+      if (routine && JSON.stringify(routine.goalIds) !== JSON.stringify(goalIds)) {
+        // only call if order actually changed and we didn't already call moveGoal
+        const anyMoved = goalIds.some((id) => {
+          const g = goals.find((g) => g.id === id);
+          return g && g.routineId !== rId;
+        });
+        if (!anyMoved) {
+          // Pure reorder within same routine
+          const { updateGoalOrder } = await import('../services/firestoreService');
+          const { auth } = await import('../services/firebase');
+          if (auth.currentUser) {
+            await updateGoalOrder(auth.currentUser.uid, rId, goalIds);
+          }
+        }
+      }
+    }
+  };
 
   // ── Render each flat item ────────────────────────────────────────────────────
   const renderItem = ({ item, drag, isActive }: RenderItemParams<FlatItem>) => {
-    // ── Routine header ────────────────────────────────────────────────────────
     if (item.type === 'routine') {
       return (
         <ScaleDecorator>
@@ -149,7 +157,7 @@ export default function ManageScreen() {
               <TouchableOpacity hitSlop={10} onPress={() => setRoutineModal({ visible: true, routine: item.routine })}>
                 <Text style={styles.actionIcon}>✏️</Text>
               </TouchableOpacity>
-              <TouchableOpacity hitSlop={10} onPress={() => handleDeleteRoutine(item.routine)}>
+              <TouchableOpacity hitSlop={10} onPress={() => deleteRoutine(item.routine)}>
                 <Text style={styles.actionIcon}>🗑️</Text>
               </TouchableOpacity>
             </View>
@@ -158,7 +166,6 @@ export default function ManageScreen() {
       );
     }
 
-    // ── Goal row ──────────────────────────────────────────────────────────────
     if (item.type === 'goal') {
       return (
         <ScaleDecorator>
@@ -176,7 +183,7 @@ export default function ManageScreen() {
               <TouchableOpacity hitSlop={10} onPress={() => setGoalModal({ visible: true, goal: item.goal })}>
                 <Text style={styles.actionIcon}>✏️</Text>
               </TouchableOpacity>
-              <TouchableOpacity hitSlop={10} onPress={() => handleDeleteGoal(item.goal)}>
+              <TouchableOpacity hitSlop={10} onPress={() => deleteGoal(item.goal.id, item.goal.routineId)}>
                 <Text style={styles.actionIcon}>🗑️</Text>
               </TouchableOpacity>
             </View>
@@ -185,7 +192,6 @@ export default function ManageScreen() {
       );
     }
 
-    // ── Add-habit row (not draggable — drag is never called) ──────────────────
     return (
       <Pressable
         style={styles.addGoalRow}
@@ -196,7 +202,6 @@ export default function ManageScreen() {
     );
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.container}>
@@ -221,12 +226,19 @@ export default function ManageScreen() {
         <RoutineModal
           visible={routineModal.visible}
           routine={routineModal.routine}
-          onSave={(name) => {
+          onSave={async (name) => {
             if (routineModal.routine) {
-              dispatch(updateRoutine({ id: routineModal.routine.id, name }));
+              await updateRoutine({ ...routineModal.routine, name });
             } else {
-              dispatch(addRoutine({ name }));
+              const id = uid7();
+              await addRoutine({
+                id,
+                name,
+                order: routines.length,
+                goalIds: [],
+              });
             }
+            setRoutineModal({ visible: false });
           }}
           onClose={() => setRoutineModal({ visible: false })}
         />
@@ -236,12 +248,13 @@ export default function ManageScreen() {
           goal={goalModal.goal}
           routines={sortedRoutines}
           defaultRoutineId={goalModal.defaultRoutineId}
-          onSave={(data) => {
+          onSave={async (data) => {
             if (data.id) {
-              dispatch(updateGoal({ ...data, id: data.id } as Goal));
+              await updateGoal(data as Goal);
             } else {
-              dispatch(addGoal(data as Omit<Goal, 'id'>));
+              await addGoal({ ...data, id: uid7() } as Goal);
             }
+            setGoalModal({ visible: false });
           }}
           onClose={() => setGoalModal({ visible: false })}
         />
@@ -261,8 +274,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 2,
   },
-
-  // Routine header row
   routineHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -280,8 +291,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     letterSpacing: 0.3,
   },
-
-  // Goal row
   goalRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -313,8 +322,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
   },
-
-  // Active drag state (applies to both)
   activeRow: {
     opacity: 0.92,
     shadowColor: '#000',
@@ -324,8 +331,6 @@ const styles = StyleSheet.create({
     elevation: 8,
     borderRadius: 10,
   },
-
-  // Add habit row
   addGoalRow: {
     backgroundColor: '#fff',
     paddingVertical: 11,
@@ -339,8 +344,6 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
     textAlign: 'center',
   },
-
-  // Shared
   dragHandle: {
     fontSize: 16,
     color: '#bbb',
@@ -355,8 +358,6 @@ const styles = StyleSheet.create({
   actionIcon: {
     fontSize: 15,
   },
-
-  // Add routine footer
   addRoutineBtn: {
     marginTop: 20,
     padding: 16,

@@ -1,9 +1,8 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAppSelector, useAppDispatch } from '../store';
-import { setGoalStatus, startTimer, stopTimer } from '../store/slices/routinesSlice';
+import { useHabitData } from '../context/HabitDataContext';
 import { Goal, Routine } from '../types';
 import GoalCard from '../components/GoalCard';
 import RoutineCard from '../components/RoutineCard';
@@ -15,10 +14,12 @@ type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
-  const dispatch = useAppDispatch();
-  const { routines, goals, entries, timingSegments, activeTimers } = useAppSelector(
-    (state) => state.routines
-  );
+  const {
+    loading,
+    routines, goals, entries, timingSegments, activeTimers,
+    setGoalStatus,
+    startTimer, stopTimer,
+  } = useHabitData();
 
   const getGoalsForRoutine = (routine: Routine): Goal[] =>
     routine.goalIds.map((id) => goals.find((g) => g.id === id)!).filter(Boolean);
@@ -26,7 +27,7 @@ export default function HomeScreen() {
   const getEntry = (goalId: string) =>
     entries.find((e) => e.goalId === goalId && e.date === today);
 
-  // ── Goal timers ─────────────────────────────────────────────────
+  // ── Goal timers ──────────────────────────────────────────────────────────
   const getActiveGoalTimer = (goalId: string) =>
     activeTimers.find((t) => t.targetId === goalId && t.targetType === 'goal') ?? null;
 
@@ -37,13 +38,13 @@ export default function HomeScreen() {
 
   const handleGoalTimerToggle = (goalId: string) => {
     if (getActiveGoalTimer(goalId)) {
-      dispatch(stopTimer({ targetId: goalId }));
+      stopTimer(goalId);
     } else {
-      dispatch(startTimer({ targetId: goalId, targetType: 'goal' }));
+      startTimer(goalId, 'goal');
     }
   };
 
-  // ── Routine timers ───────────────────────────────────────────────
+  // ── Routine timers ───────────────────────────────────────────────────────
   const getActiveRoutineTimer = (routineId: string) =>
     activeTimers.find((t) => t.targetId === routineId && t.targetType === 'routine') ?? null;
 
@@ -54,9 +55,9 @@ export default function HomeScreen() {
 
   const handleRoutineTimerToggle = (routineId: string) => {
     if (getActiveRoutineTimer(routineId)) {
-      dispatch(stopTimer({ targetId: routineId }));
+      stopTimer(routineId);
     } else {
-      dispatch(startTimer({ targetId: routineId, targetType: 'routine' }));
+      startTimer(routineId, 'routine');
     }
   };
 
@@ -75,6 +76,14 @@ export default function HomeScreen() {
     day: 'numeric',
   });
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Header */}
@@ -85,42 +94,39 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      {routines
-        .slice()
-        .sort((a, b) => a.order - b.order)
-        .map((routine) => {
-          const routineGoals = getGoalsForRoutine(routine);
-          const status = getRoutineStatus(routine);
-          return (
-            <RoutineCard
-              key={routine.id}
-              routine={routine}
-              status={status}
-              isTimerRunning={!!getActiveRoutineTimer(routine.id)}
-              timerStartedAt={getActiveRoutineTimer(routine.id)?.startedAt ?? null}
-              totalTimerMs={getRoutineSegmentMs(routine.id)}
-              onTimerToggle={() => handleRoutineTimerToggle(routine.id)}
-            >
-              {routineGoals.map((goal) => {
-                const entry = getEntry(goal.id);
-                return (
-                  <GoalCard
-                    key={goal.id}
-                    goal={goal}
-                    completed={entry?.completed ?? null}
-                    onDone={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: true }))}
-                    onFail={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: false }))}
-                    onClear={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: null }))}
-                    isTimerRunning={!!getActiveGoalTimer(goal.id)}
-                    timerStartedAt={getActiveGoalTimer(goal.id)?.startedAt ?? null}
-                    totalTimerMs={getGoalSegmentMs(goal.id)}
-                    onTimerToggle={() => handleGoalTimerToggle(goal.id)}
-                  />
-                );
-              })}
-            </RoutineCard>
-          );
-        })}
+      {routines.map((routine) => {
+        const routineGoals = getGoalsForRoutine(routine);
+        const status = getRoutineStatus(routine);
+        return (
+          <RoutineCard
+            key={routine.id}
+            routine={routine}
+            status={status}
+            isTimerRunning={!!getActiveRoutineTimer(routine.id)}
+            timerStartedAt={getActiveRoutineTimer(routine.id)?.startedAt ?? null}
+            totalTimerMs={getRoutineSegmentMs(routine.id)}
+            onTimerToggle={() => handleRoutineTimerToggle(routine.id)}
+          >
+            {routineGoals.map((goal) => {
+              const entry = getEntry(goal.id);
+              return (
+                <GoalCard
+                  key={goal.id}
+                  goal={goal}
+                  completed={entry?.completed ?? null}
+                  onDone={() => setGoalStatus(goal.id, goal.routineId, today, true)}
+                  onFail={() => setGoalStatus(goal.id, goal.routineId, today, false)}
+                  onClear={() => setGoalStatus(goal.id, goal.routineId, today, null)}
+                  isTimerRunning={!!getActiveGoalTimer(goal.id)}
+                  timerStartedAt={getActiveGoalTimer(goal.id)?.startedAt ?? null}
+                  totalTimerMs={getGoalSegmentMs(goal.id)}
+                  onTimerToggle={() => handleGoalTimerToggle(goal.id)}
+                />
+              );
+            })}
+          </RoutineCard>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -151,5 +157,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#4CAF50',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
   },
 });
