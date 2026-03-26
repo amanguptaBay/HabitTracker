@@ -40,15 +40,13 @@ export interface ActiveTimer {
 }
 
 export interface UserSettings {
-  /** Hour (0-23) at which the logical day resets. Default 0 = midnight. */
-  dayStartHour: number;
-  /** Minute (0-59) offset within that hour. Default 0. */
-  dayStartMinute: number;
+  /** IANA timezone string. Day rolls over at midnight in this timezone. */
+  timezone: string;
 }
 
+// Auto-detect device timezone, fall back to UTC
 export const DEFAULT_SETTINGS: UserSettings = {
-  dayStartHour: 0,
-  dayStartMinute: 0,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
 };
 
 export interface RoutinesState {

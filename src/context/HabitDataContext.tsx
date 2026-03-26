@@ -119,8 +119,8 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   segmentsRef.current = timingSegments;
   settingsRef.current = settings;
 
-  // Derived: logical date string for today given current settings
-  const logicalToday = getLogicalDate(settings.dayStartHour, settings.dayStartMinute);
+  // Derived: logical date string for today in the user's timezone
+  const logicalToday = getLogicalDate(settings.timezone);
 
   // Which date the home screen is currently browsing (defaults to today)
   const [viewingDate, setViewingDate] = useState<string>(logicalToday);
@@ -207,7 +207,7 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Seed an entry for the current logical day so it's immediately interactive
-    const date    = getLogicalDate(settingsRef.current.dayStartHour, settingsRef.current.dayStartMinute);
+    const date    = getLogicalDate(settingsRef.current.timezone);
     const entryId = `entry-${goal.id}-${date}`;
     await upsertEntry(uid, {
       id: entryId,
@@ -305,13 +305,13 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
 
     const endTime   = nowIso();
     const startTime = timer.startedAt;
-    const { dayStartHour, dayStartMinute } = settingsRef.current;
+    const { timezone } = settingsRef.current;
 
     // Delete from Firestore first — onSnapshot clears it from UI
     await stopActiveTimer(uid, targetId);
 
     // Split the run into per-logical-day chunks (usually just one)
-    const chunks = splitByLogicalDay(startTime, endTime, dayStartHour, dayStartMinute);
+    const chunks = splitByLogicalDay(startTime, endTime, timezone);
 
     for (const chunk of chunks) {
       // For each chunk, check if we can merge with the last segment on that date
