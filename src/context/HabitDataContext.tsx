@@ -17,7 +17,7 @@ import React, {
   useRef,
 } from 'react';
 import { Goal, Routine, Entry, TimingSegment, ActiveTimer } from '../types';
-import { ensureSignedIn, subscribeToAuth } from '../services/auth';
+import { subscribeToAuth } from '../services/auth';
 import {
   listenRoutines,
   listenGoals,
@@ -106,18 +106,9 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const unsub = subscribeToAuth(async (user) => {
-      if (user) {
-        setUid(user.uid);
-      } else {
-        // No user yet — sign in anonymously
-        try {
-          const id = await ensureSignedIn();
-          setUid(id);
-        } catch (e) {
-          console.error('Anonymous sign-in failed', e);
-        }
-      }
+    const unsub = subscribeToAuth((user) => {
+      setUid(user?.uid ?? null);
+      if (!user) setLoading(false); // not signed in — nothing to load
     });
     return unsub;
   }, []);

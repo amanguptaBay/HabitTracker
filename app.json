@@ -27,6 +27,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "habittracker",
+    "plugins": [
+      "expo-web-browser"
+    ]
   }
 }
