@@ -48,6 +48,8 @@ interface HabitDataCtx {
   loading: boolean;
   settings: UserSettings;
   logicalToday: string;
+  viewingDate: string;
+  setViewingDate: (date: string) => void;
 
   // Data
   routines: Routine[];
@@ -120,6 +122,18 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   // Derived: logical date string for today given current settings
   const logicalToday = getLogicalDate(settings.dayStartHour, settings.dayStartMinute);
 
+  // Which date the home screen is currently browsing (defaults to today)
+  const [viewingDate, setViewingDate] = useState<string>(logicalToday);
+
+  // When the logical day rolls over, snap back to the new today
+  const prevLogicalToday = useRef(logicalToday);
+  useEffect(() => {
+    if (prevLogicalToday.current !== logicalToday) {
+      prevLogicalToday.current = logicalToday;
+      setViewingDate(logicalToday);
+    }
+  }, [logicalToday]);
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = subscribeToAuth((user) => {
@@ -148,16 +162,15 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     return () => unsubs.forEach((u) => u());
   }, [uid]);
 
-  // Re-subscribe entries + segments whenever the logical date changes
-  // (e.g. day rolls over while app is open, or dayStartHour setting changes)
+  // Re-subscribe entries + segments whenever the viewed date changes
   useEffect(() => {
     if (!uid) return;
     const unsubs = [
-      listenEntries(uid, logicalToday, setEntries),
-      listenTimingSegments(uid, logicalToday, setTimingSegments),
+      listenEntries(uid, viewingDate, setEntries),
+      listenTimingSegments(uid, viewingDate, setTimingSegments),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [uid, logicalToday]);
+  }, [uid, viewingDate]);
 
   // ── Routine mutations ─────────────────────────────────────────────────────
 
@@ -336,7 +349,7 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={{
       uid, loading,
-      settings, logicalToday,
+      settings, logicalToday, viewingDate, setViewingDate,
       routines, goals, entries, timingSegments, activeTimers,
       addRoutine, updateRoutine, deleteRoutine, reorderAll,
       addGoal, updateGoal, deleteGoal, moveGoal,
