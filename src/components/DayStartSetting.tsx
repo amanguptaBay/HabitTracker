@@ -8,15 +8,11 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useHabitData } from '../context/HabitDataContext';
 
-const HOURS = [
-  { label: '12am', hour: 0 },
-  { label: '1am',  hour: 1 },
-  { label: '2am',  hour: 2 },
-  { label: '3am',  hour: 3 },
-  { label: '4am',  hour: 4 },
-  { label: '5am',  hour: 5 },
-  { label: '6am',  hour: 6 },
-];
+const HOURS = Array.from({ length: 24 }, (_, i) => {
+  const period = i < 12 ? 'am' : 'pm';
+  const display = i === 0 ? '12am' : i === 12 ? '12pm' : i < 12 ? `${i}am` : `${i - 12}pm`;
+  return { label: display, hour: i };
+});
 
 const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
