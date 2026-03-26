@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Goal } from '../types';
 import TriStateSlider from './TriStateSlider';
+import TimerButton from './TimerButton';
 
 interface Props {
   goal: Goal;
@@ -9,9 +10,24 @@ interface Props {
   onDone: () => void;
   onFail: () => void;
   onClear: () => void;
+  // Timer
+  isTimerRunning: boolean;
+  timerStartedAt: string | null;
+  totalTimerMs: number;
+  onTimerToggle: () => void;
 }
 
-export default function GoalCard({ goal, completed, onDone, onFail, onClear }: Props) {
+export default function GoalCard({
+  goal,
+  completed,
+  onDone,
+  onFail,
+  onClear,
+  isTimerRunning,
+  timerStartedAt,
+  totalTimerMs,
+  onTimerToggle,
+}: Props) {
   const isDone = completed === true;
   const isFailed = completed === false;
 
@@ -23,6 +39,7 @@ export default function GoalCard({ goal, completed, onDone, onFail, onClear }: P
 
   return (
     <View style={styles.row}>
+      {/* Left: name + criteria */}
       <View style={styles.info}>
         <View style={styles.nameRow}>
           <Text style={[styles.name, isDone && styles.nameDone, isFailed && styles.nameFailed]}>
@@ -35,7 +52,16 @@ export default function GoalCard({ goal, completed, onDone, onFail, onClear }: P
         ) : null}
       </View>
 
-      <TriStateSlider value={completed} onChange={handleChange} />
+      {/* Right: timer + slider */}
+      <View style={styles.controls}>
+        <TimerButton
+          isRunning={isTimerRunning}
+          startedAt={timerStartedAt}
+          totalSegmentMs={totalTimerMs}
+          onToggle={onTimerToggle}
+        />
+        <TriStateSlider value={completed} onChange={handleChange} />
+      </View>
     </View>
   );
 }
@@ -82,5 +108,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     marginTop: 2,
+  },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 });

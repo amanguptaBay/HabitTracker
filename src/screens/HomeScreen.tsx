@@ -1,17 +1,24 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
-import { SafeAreaView } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppSelector, useAppDispatch } from '../store';
-import { setGoalStatus } from '../store/slices/routinesSlice';
+import { setGoalStatus, startTimer, stopTimer } from '../store/slices/routinesSlice';
 import { Goal, Routine } from '../types';
 import GoalCard from '../components/GoalCard';
 import RoutineCard from '../components/RoutineCard';
+import { RootStackParamList } from '../navigation/types';
 
 const today = new Date().toISOString().split('T')[0];
 
+type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+
 export default function HomeScreen() {
+  const navigation = useNavigation<Nav>();
   const dispatch = useAppDispatch();
-  const { routines, goals, entries } = useAppSelector((state) => state.routines);
+  const { routines, goals, entries, timingSegments, activeTimers } = useAppSelector(
+    (state) => state.routines
+  );
 
   const getGoalsForRoutine = (routine: Routine): Goal[] =>
     routine.goalIds.map((id) => goals.find((g) => g.id === id)!).filter(Boolean);
@@ -19,12 +26,44 @@ export default function HomeScreen() {
   const getEntry = (goalId: string) =>
     entries.find((e) => e.goalId === goalId && e.date === today);
 
-  // Complete = all required goals explicitly done (true)
-  // Failed = any required goal explicitly failed (false)
-  // Pending = at least one required goal has no response (null)
+  // ── Goal timers ─────────────────────────────────────────────────
+  const getActiveGoalTimer = (goalId: string) =>
+    activeTimers.find((t) => t.targetId === goalId && t.targetType === 'goal') ?? null;
+
+  const getGoalSegmentMs = (goalId: string) =>
+    timingSegments
+      .filter((s) => s.targetId === goalId && s.targetType === 'goal' && s.date === today)
+      .reduce((sum, s) => sum + s.durationMs, 0);
+
+  const handleGoalTimerToggle = (goalId: string) => {
+    if (getActiveGoalTimer(goalId)) {
+      dispatch(stopTimer({ targetId: goalId }));
+    } else {
+      dispatch(startTimer({ targetId: goalId, targetType: 'goal' }));
+    }
+  };
+
+  // ── Routine timers ───────────────────────────────────────────────
+  const getActiveRoutineTimer = (routineId: string) =>
+    activeTimers.find((t) => t.targetId === routineId && t.targetType === 'routine') ?? null;
+
+  const getRoutineSegmentMs = (routineId: string) =>
+    timingSegments
+      .filter((s) => s.targetId === routineId && s.targetType === 'routine' && s.date === today)
+      .reduce((sum, s) => sum + s.durationMs, 0);
+
+  const handleRoutineTimerToggle = (routineId: string) => {
+    if (getActiveRoutineTimer(routineId)) {
+      dispatch(stopTimer({ targetId: routineId }));
+    } else {
+      dispatch(startTimer({ targetId: routineId, targetType: 'routine' }));
+    }
+  };
+
   const getRoutineStatus = (routine: Routine): 'complete' | 'failed' | 'pending' => {
     const required = getGoalsForRoutine(routine).filter((g) => g.required);
     const statuses = required.map((g) => getEntry(g.id)?.completed ?? null);
+    if (statuses.length === 0) return 'pending';
     if (statuses.every((s) => s === true)) return 'complete';
     if (statuses.some((s) => s === false)) return 'failed';
     return 'pending';
@@ -38,7 +77,14 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.date}>{formattedDate}</Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.date}>{formattedDate}</Text>
+        <Pressable onPress={() => navigation.navigate('Manage')} hitSlop={8}>
+          <Text style={styles.manageBtn}>Manage</Text>
+        </Pressable>
+      </View>
+
       {routines
         .slice()
         .sort((a, b) => a.order - b.order)
@@ -46,7 +92,15 @@ export default function HomeScreen() {
           const routineGoals = getGoalsForRoutine(routine);
           const status = getRoutineStatus(routine);
           return (
-            <RoutineCard key={routine.id} routine={routine} status={status}>
+            <RoutineCard
+              key={routine.id}
+              routine={routine}
+              status={status}
+              isTimerRunning={!!getActiveRoutineTimer(routine.id)}
+              timerStartedAt={getActiveRoutineTimer(routine.id)?.startedAt ?? null}
+              totalTimerMs={getRoutineSegmentMs(routine.id)}
+              onTimerToggle={() => handleRoutineTimerToggle(routine.id)}
+            >
               {routineGoals.map((goal) => {
                 const entry = getEntry(goal.id);
                 return (
@@ -57,6 +111,10 @@ export default function HomeScreen() {
                     onDone={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: true }))}
                     onFail={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: false }))}
                     onClear={() => dispatch(setGoalStatus({ goalId: goal.id, date: today, status: null }))}
+                    isTimerRunning={!!getActiveGoalTimer(goal.id)}
+                    timerStartedAt={getActiveGoalTimer(goal.id)?.startedAt ?? null}
+                    totalTimerMs={getGoalSegmentMs(goal.id)}
+                    onTimerToggle={() => handleGoalTimerToggle(goal.id)}
                   />
                 );
               })}
@@ -75,11 +133,23 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     gap: 16,
+    paddingTop: 60,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
   },
   date: {
     fontSize: 22,
     fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 4,
+    flex: 1,
+  },
+  manageBtn: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4CAF50',
   },
 });
