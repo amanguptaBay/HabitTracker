@@ -11,34 +11,42 @@ import {
 } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { PhoneAuthProvider } from 'firebase/auth';
 import { auth } from '../services/firebase';
-import { signInWithGoogle, confirmPhoneCode } from '../services/auth';
+import { signInWithGoogle, signInWithGooglePopup, confirmPhoneCode } from '../services/auth';
 
-// Required for Google sign-in redirect to close the browser tab automatically
+// expo-firebase-recaptcha uses WebView — not available on web platform
+// Lazy require prevents the module from even loading on web
+const FirebaseRecaptchaVerifierModal =
+  Platform.OS !== 'web'
+    ? require('expo-firebase-recaptcha').FirebaseRecaptchaVerifierModal
+    : null;
+
+// Required for Google OAuth redirect to close the in-app browser automatically
 WebBrowser.maybeCompleteAuthSession();
 
-// ─── TODO: Add your client IDs ───────────────────────────────────────────────
+// ─── Client IDs ───────────────────────────────────────────────────────────────
 // Firebase Console → Authentication → Sign-in method → Google → Web client ID
-const WEB_CLIENT_ID    = 'YOUR_WEB_CLIENT_ID';
-// Google Cloud Console → APIs & Services → Credentials → iOS OAuth client
-const IOS_CLIENT_ID    = 'YOUR_IOS_CLIENT_ID';
+const WEB_CLIENT_ID = '164879829524-jvjg0uddj2d8frf7u4k92cbtgpq2s5cf';
+// Google Cloud Console → APIs & Services → Credentials → iOS OAuth 2.0 client
+const IOS_CLIENT_ID = 'YOUR_IOS_CLIENT_ID';
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Step = 'choose' | 'phone-number' | 'phone-otp';
 
+const isWeb = Platform.OS === 'web';
+
 export default function LoginScreen() {
-  const [step, setStep]         = useState<Step>('choose');
-  const [phone, setPhone]       = useState('');
-  const [otp, setOtp]           = useState('');
-  const [verificationId, setVId]= useState('');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [step, setStep]          = useState<Step>('choose');
+  const [phone, setPhone]        = useState('');
+  const [otp, setOtp]            = useState('');
+  const [verificationId, setVId] = useState('');
+  const [loading, setLoading]    = useState(false);
+  const [error, setError]        = useState('');
 
-  const recaptchaRef = useRef<FirebaseRecaptchaVerifierModal>(null);
+  const recaptchaRef = useRef<any>(null);
 
-  // ── Google ──────────────────────────────────────────────────────────────────
+  // ── Google (native) ──────────────────────────────────────────────────────────
   const [, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
     webClientId: WEB_CLIENT_ID,
     iosClientId: IOS_CLIENT_ID,
@@ -55,7 +63,20 @@ export default function LoginScreen() {
     }
   }, [googleResponse]);
 
-  // ── Phone — step 1: send code ────────────────────────────────────────────────
+  // ── Google (web) ─────────────────────────────────────────────────────────────
+  const handleGoogleWeb = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await signInWithGooglePopup();
+    } catch (e: any) {
+      setError(e.message ?? 'Google sign-in failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Phone — step 1: send SMS ─────────────────────────────────────────────────
   const handleSendCode = async () => {
     setError('');
     if (!phone.trim()) { setError('Enter a phone number.'); return; }
@@ -79,12 +100,17 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await confirmPhoneCode(verificationId, otp.trim());
-      // Auth state observer in App.tsx handles navigation
+      // Auth state observer in App.tsx unmounts this screen automatically
     } catch (e: any) {
       setError(e.message ?? 'Invalid code.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGooglePress = () => {
+    setError('');
+    isWeb ? handleGoogleWeb() : promptGoogleAsync();
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -94,12 +120,14 @@ export default function LoginScreen() {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* reCAPTCHA — invisible until phone auth triggers it */}
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaRef}
-        firebaseConfig={auth.app.options}
-        attemptInvisibleVerification
-      />
+      {/* reCAPTCHA modal — native only */}
+      {!isWeb && FirebaseRecaptchaVerifierModal && (
+        <FirebaseRecaptchaVerifierModal
+          ref={recaptchaRef}
+          firebaseConfig={auth.app.options}
+          attemptInvisibleVerification
+        />
+      )}
 
       {/* ── Hero ──────────────────────────────────────────────────────────── */}
       <View style={styles.hero}>
@@ -121,28 +149,31 @@ export default function LoginScreen() {
             {/* Google */}
             <Pressable
               style={({ pressed }) => [styles.btn, styles.btnGoogle, pressed && styles.btnPressed]}
-              onPress={() => { setError(''); promptGoogleAsync(); }}
+              onPress={handleGooglePress}
               disabled={loading}
             >
               <Text style={styles.btnGoogleLogo}>G</Text>
               <Text style={styles.btnGoogleText}>Continue with Google</Text>
             </Pressable>
 
-            {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
+            {/* Phone — native only; web Firebase phone auth requires DOM reCAPTCHA */}
+            {!isWeb && (
+              <>
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
 
-            {/* Phone */}
-            <Pressable
-              style={({ pressed }) => [styles.btn, styles.btnPhone, pressed && styles.btnPressed]}
-              onPress={() => { setError(''); setStep('phone-number'); }}
-              disabled={loading}
-            >
-              <Text style={styles.btnPhoneText}>Continue with Phone Number</Text>
-            </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.btn, styles.btnPhone, pressed && styles.btnPressed]}
+                  onPress={() => { setError(''); setStep('phone-number'); }}
+                  disabled={loading}
+                >
+                  <Text style={styles.btnPhoneText}>Continue with Phone Number</Text>
+                </Pressable>
+              </>
+            )}
           </>
         )}
 
@@ -158,7 +189,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="+1 555 000 0000"
-              placeholderTextColor="#bbb"
+              placeholderTextColor="#555"
               keyboardType="phone-pad"
               value={phone}
               onChangeText={setPhone}
@@ -189,7 +220,7 @@ export default function LoginScreen() {
             <TextInput
               style={[styles.input, styles.otpInput]}
               placeholder="000000"
-              placeholderTextColor="#bbb"
+              placeholderTextColor="#555"
               keyboardType="number-pad"
               maxLength={6}
               value={otp}
@@ -224,8 +255,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     paddingBottom: 48,
   },
-
-  // Hero
   hero: {
     flex: 1,
     alignItems: 'center',
@@ -258,10 +287,7 @@ const styles = StyleSheet.create({
   tagline: {
     fontSize: 16,
     color: '#888',
-    fontWeight: '400',
   },
-
-  // Card
   card: {
     backgroundColor: '#1a1a1a',
     marginHorizontal: 16,
@@ -281,8 +307,6 @@ const styles = StyleSheet.create({
     marginTop: -6,
     marginBottom: 4,
   },
-
-  // Buttons
   btn: {
     height: 52,
     borderRadius: 14,
@@ -316,8 +340,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-
-  // Divider
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -333,8 +355,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#555',
   },
-
-  // Input
   input: {
     backgroundColor: '#262626',
     borderRadius: 12,
@@ -351,8 +371,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 8,
   },
-
-  // Back
   backBtn: {
     alignSelf: 'flex-start',
     marginBottom: -4,
@@ -362,8 +380,6 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
     fontWeight: '600',
   },
-
-  // Error
   errorText: {
     fontSize: 13,
     color: '#FF5252',

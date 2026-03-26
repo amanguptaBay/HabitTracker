@@ -8,6 +8,7 @@ import {
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView, TouchableOpacity } from 'react-native-gesture-handler';
 import { useHabitData } from '../context/HabitDataContext';
+import { signOut } from '../services/auth';
 import { Goal, Routine } from '../types';
 import RoutineModal from '../components/manage/RoutineModal';
 import GoalModal from '../components/manage/GoalModal';
@@ -214,12 +215,21 @@ export default function ManageScreen() {
           activationDistance={10}
           contentContainerStyle={styles.listContent}
           ListFooterComponent={
-            <Pressable
-              style={styles.addRoutineBtn}
-              onPress={() => setRoutineModal({ visible: true, routine: null })}
-            >
-              <Text style={styles.addRoutineText}>＋ Add Routine</Text>
-            </Pressable>
+            <View style={styles.footer}>
+              <Pressable
+                style={styles.addRoutineBtn}
+                onPress={() => setRoutineModal({ visible: true, routine: null })}
+              >
+                <Text style={styles.addRoutineText}>＋ Add Routine</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.signOutBtn}
+                onPress={() => signOut()}
+              >
+                <Text style={styles.signOutText}>Sign Out</Text>
+              </Pressable>
+            </View>
           }
         />
 
@@ -358,8 +368,12 @@ const styles = StyleSheet.create({
   actionIcon: {
     fontSize: 15,
   },
-  addRoutineBtn: {
+  footer: {
+    gap: 12,
     marginTop: 20,
+    paddingBottom: 32,
+  },
+  addRoutineBtn: {
     padding: 16,
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -372,5 +386,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#888',
+  },
+  signOutBtn: {
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#ffcdd2',
+    backgroundColor: '#fff5f5',
+  },
+  signOutText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FF5252',
   },
 });
