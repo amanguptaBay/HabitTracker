@@ -8,18 +8,18 @@ import GoalCard from '../components/GoalCard';
 import RoutineCard from '../components/RoutineCard';
 import { RootStackParamList } from '../navigation/types';
 
-const today = new Date().toISOString().split('T')[0];
-
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const {
-    loading,
+    loading, logicalToday,
     routines, goals, entries, timingSegments, activeTimers,
     setGoalStatus,
     startTimer, stopTimer,
   } = useHabitData();
+
+  const today = logicalToday;
 
   const getGoalsForRoutine = (routine: Routine): Goal[] =>
     routine.goalIds.map((id) => goals.find((g) => g.id === id)!).filter(Boolean);

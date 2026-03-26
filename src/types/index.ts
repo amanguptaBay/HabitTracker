@@ -39,6 +39,15 @@ export interface ActiveTimer {
   startedAt: string;         // ISO 8601 — when the current run started
 }
 
+export interface UserSettings {
+  /** Hour (0-23) at which the logical day resets. Default 0 = midnight. */
+  dayStartHour: number;
+}
+
+export const DEFAULT_SETTINGS: UserSettings = {
+  dayStartHour: 0,
+};
+
 export interface RoutinesState {
   routines: Routine[];
   goals: Goal[];

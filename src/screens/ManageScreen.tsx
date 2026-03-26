@@ -9,6 +9,7 @@ import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-nativ
 import { GestureHandlerRootView, TouchableOpacity } from 'react-native-gesture-handler';
 import { useHabitData } from '../context/HabitDataContext';
 import { signOut } from '../services/auth';
+import DayStartSetting from '../components/DayStartSetting';
 import { Goal, Routine } from '../types';
 import RoutineModal from '../components/manage/RoutineModal';
 import GoalModal from '../components/manage/GoalModal';
@@ -222,6 +223,8 @@ export default function ManageScreen() {
               >
                 <Text style={styles.addRoutineText}>＋ Add Routine</Text>
               </Pressable>
+
+              <DayStartSetting />
 
               <Pressable
                 style={styles.signOutBtn}

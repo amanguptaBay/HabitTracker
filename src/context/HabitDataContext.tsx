@@ -16,7 +16,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { Goal, Routine, Entry, TimingSegment, ActiveTimer } from '../types';
+import { Goal, Routine, Entry, TimingSegment, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types';
 import { subscribeToAuth } from '../services/auth';
 import {
   listenRoutines,
@@ -24,6 +24,8 @@ import {
   listenEntries,
   listenTimingSegments,
   listenActiveTimers,
+  listenSettings,
+  saveSettings,
   startActiveTimer,
   stopActiveTimer,
   saveRoutine,
@@ -36,6 +38,7 @@ import {
   saveTimingSegment,
   mergeTimingSegments,
 } from '../services/firestoreService';
+import { getLogicalDate, splitByLogicalDay } from '../utils/date';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +46,8 @@ interface HabitDataCtx {
   // Meta
   uid: string | null;
   loading: boolean;
+  settings: UserSettings;
+  logicalToday: string;
 
   // Data
   routines: Routine[];
@@ -66,6 +71,9 @@ interface HabitDataCtx {
   // Entry mutations
   setGoalStatus:  (goalId: string, routineId: string, date: string, status: boolean | null) => Promise<void>;
 
+  // Settings mutations
+  updateSettings: (s: Partial<UserSettings>) => Promise<void>;
+
   // Timer mutations
   startTimer:     (targetId: string, targetType: 'goal' | 'routine') => Promise<void>;
   stopTimer:      (targetId: string) => Promise<void>;
@@ -83,7 +91,6 @@ export function useHabitData(): HabitDataCtx {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const today = () => new Date().toISOString().split('T')[0];
 const nowIso = () => new Date().toISOString();
 
 function uid7() {
@@ -97,15 +104,21 @@ const MERGE_GAP_MS = 60_000; // merge segments with < 1 min gap
 export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   const [uid, setUid]                       = useState<string | null>(null);
   const [loading, setLoading]               = useState(true);
+  const [settings, setSettings]             = useState<UserSettings>(DEFAULT_SETTINGS);
   const [routines, setRoutines]             = useState<Routine[]>([]);
   const [goals, setGoals]                   = useState<Goal[]>([]);
   const [entries, setEntries]               = useState<Entry[]>([]);
   const [timingSegments, setTimingSegments] = useState<TimingSegment[]>([]);
   const [activeTimers, setActiveTimers]     = useState<ActiveTimer[]>([]);
 
-  // Keep a ref to timingSegments so stopTimer closures don't go stale
+  // Keep refs so callbacks always see current values without stale closures
   const segmentsRef = useRef<TimingSegment[]>([]);
+  const settingsRef = useRef<UserSettings>(DEFAULT_SETTINGS);
   segmentsRef.current = timingSegments;
+  settingsRef.current = settings;
+
+  // Derived: logical date string for today given current settings
+  const logicalToday = getLogicalDate(settings.dayStartHour);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -120,20 +133,31 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!uid) return;
 
-    const date = today();
+    // Settings must resolve before we know the logical date, so subscribe first.
+    // Entry/segment listeners re-attach when logicalToday changes (see next effect).
     const unsubs = [
+      listenSettings(uid, (s) => setSettings(s)),
       listenRoutines(uid, (data) => {
         setRoutines(data.slice().sort((a, b) => a.order - b.order));
         setLoading(false);
       }),
       listenGoals(uid, setGoals),
-      listenEntries(uid, date, setEntries),
-      listenTimingSegments(uid, date, setTimingSegments),
       listenActiveTimers(uid, setActiveTimers),
     ];
 
     return () => unsubs.forEach((u) => u());
   }, [uid]);
+
+  // Re-subscribe entries + segments whenever the logical date changes
+  // (e.g. day rolls over while app is open, or dayStartHour setting changes)
+  useEffect(() => {
+    if (!uid) return;
+    const unsubs = [
+      listenEntries(uid, logicalToday, setEntries),
+      listenTimingSegments(uid, logicalToday, setTimingSegments),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [uid, logicalToday]);
 
   // ── Routine mutations ─────────────────────────────────────────────────────
 
@@ -169,13 +193,14 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
       await updateGoalOrder(uid, routine.id, [...routine.goalIds, goal.id]);
     }
 
-    // Seed a today entry so it's immediately interactive
-    const entryId = `entry-${goal.id}-${today()}`;
+    // Seed an entry for the current logical day so it's immediately interactive
+    const date    = getLogicalDate(settingsRef.current.dayStartHour);
+    const entryId = `entry-${goal.id}-${date}`;
     await upsertEntry(uid, {
       id: entryId,
       goalId: goal.id,
       routineId: goal.routineId,
-      date: today(),
+      date,
       completed: null,
     });
   }, [uid, routines]);
@@ -243,6 +268,14 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     await upsertEntry(uid, { ...entry, completed: status });
   }, [uid, entries]);
 
+  // ── Settings mutation ─────────────────────────────────────────────────────
+
+  const updateSettings = useCallback(async (partial: Partial<UserSettings>) => {
+    if (!uid) return;
+    const next = { ...settingsRef.current, ...partial };
+    await saveSettings(uid, next);
+  }, [uid]);
+
   // ── Timer mutations — Firestore-backed ───────────────────────────────────
 
   const startTimer = useCallback(async (targetId: string, targetType: 'goal' | 'routine') => {
@@ -257,40 +290,44 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     const timer = activeTimers.find((t) => t.targetId === targetId);
     if (!timer) return;
 
-    const endTime    = nowIso();
-    const startTime  = timer.startedAt;
-    const durationMs = new Date(endTime).getTime() - new Date(startTime).getTime();
-    const date       = today();
+    const endTime   = nowIso();
+    const startTime = timer.startedAt;
+    const { dayStartHour } = settingsRef.current;
 
-    // Delete from Firestore first — onSnapshot will clear it from UI state
+    // Delete from Firestore first — onSnapshot clears it from UI
     await stopActiveTimer(uid, targetId);
 
-    // Check if we can merge with the most recent segment for this target today
-    const last = segmentsRef.current
-      .filter((s) => s.targetId === targetId && s.date === date)
-      .sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime())[0];
+    // Split the run into per-logical-day chunks (usually just one)
+    const chunks = splitByLogicalDay(startTime, endTime, dayStartHour);
 
-    const gapMs = last
-      ? new Date(startTime).getTime() - new Date(last.endTime).getTime()
-      : Infinity;
+    for (const chunk of chunks) {
+      // For each chunk, check if we can merge with the last segment on that date
+      const last = segmentsRef.current
+        .filter((s) => s.targetId === targetId && s.date === chunk.date)
+        .sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime())[0];
 
-    if (last && gapMs < MERGE_GAP_MS) {
-      const merged: TimingSegment = {
-        ...last,
-        endTime,
-        durationMs: last.durationMs + gapMs + durationMs,
-      };
-      await mergeTimingSegments(uid, merged, last.id);
-    } else {
-      await saveTimingSegment(uid, {
-        id: `seg-${uid7()}`,
-        targetId,
-        targetType: timer.targetType,
-        date,
-        startTime,
-        endTime,
-        durationMs,
-      });
+      const gapMs = last
+        ? new Date(chunk.startTime).getTime() - new Date(last.endTime).getTime()
+        : Infinity;
+
+      if (last && gapMs < MERGE_GAP_MS) {
+        const merged: TimingSegment = {
+          ...last,
+          endTime:    chunk.endTime,
+          durationMs: last.durationMs + gapMs + chunk.durationMs,
+        };
+        await mergeTimingSegments(uid, merged, last.id);
+      } else {
+        await saveTimingSegment(uid, {
+          id:         `seg-${uid7()}`,
+          targetId,
+          targetType: timer.targetType,
+          date:       chunk.date,
+          startTime:  chunk.startTime,
+          endTime:    chunk.endTime,
+          durationMs: chunk.durationMs,
+        });
+      }
     }
   }, [uid, activeTimers]);
 
@@ -299,10 +336,12 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={{
       uid, loading,
+      settings, logicalToday,
       routines, goals, entries, timingSegments, activeTimers,
       addRoutine, updateRoutine, deleteRoutine, reorderAll,
       addGoal, updateGoal, deleteGoal, moveGoal,
       setGoalStatus,
+      updateSettings,
       startTimer, stopTimer,
     }}>
       {children}

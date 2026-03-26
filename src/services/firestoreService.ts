@@ -24,7 +24,7 @@ import {
   DocumentData,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Goal, Routine, Entry, TimingSegment, ActiveTimer } from '../types';
+import { Goal, Routine, Entry, TimingSegment, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types';
 
 // ─── Collection helpers ──────────────────────────────────────────────────────
 
@@ -139,6 +139,20 @@ export const mergeTimingSegments = async (
   batch.delete(ref(uid, 'timingSegments', drop));
   await batch.commit();
 };
+
+// ─── User settings ───────────────────────────────────────────────────────────
+
+const settingsRef = (uid: string) =>
+  doc(db, 'users', uid, 'settings', 'preferences');
+
+export function listenSettings(uid: string, cb: (s: UserSettings) => void): Unsubscribe {
+  return onSnapshot(settingsRef(uid), (snap) => {
+    cb(snap.exists() ? (snap.data() as UserSettings) : DEFAULT_SETTINGS);
+  });
+}
+
+export const saveSettings = (uid: string, settings: UserSettings) =>
+  setDoc(settingsRef(uid), settings);
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
