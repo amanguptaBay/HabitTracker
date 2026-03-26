@@ -1,40 +1,52 @@
 /**
  * DayStartSetting
  *
- * Lets the user pick the hour at which their logical day resets.
- * Displayed as a row of hour pills (every 3 hours for compactness).
+ * Lets the user pick the hour + minute at which their logical day resets.
+ * Hours: 12am–6am. Minutes: every 5 mins (fine enough for testing).
  */
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useHabitData } from '../context/HabitDataContext';
 
-// Offer midnight + every 3 hours up to 6am as sensible options
-const OPTIONS = [
-  { label: '12 am', hour: 0 },
-  { label: '1 am',  hour: 1 },
-  { label: '2 am',  hour: 2 },
-  { label: '3 am',  hour: 3 },
-  { label: '4 am',  hour: 4 },
-  { label: '5 am',  hour: 5 },
-  { label: '6 am',  hour: 6 },
+const HOURS = [
+  { label: '12am', hour: 0 },
+  { label: '1am',  hour: 1 },
+  { label: '2am',  hour: 2 },
+  { label: '3am',  hour: 3 },
+  { label: '4am',  hour: 4 },
+  { label: '5am',  hour: 5 },
+  { label: '6am',  hour: 6 },
 ];
+
+const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+function pad(n: number) {
+  return n.toString().padStart(2, '0');
+}
 
 export default function DayStartSetting() {
   const { settings, updateSettings } = useHabitData();
-  const current = settings.dayStartHour;
+  const { dayStartHour, dayStartMinute } = settings;
+
+  const hourLabel   = HOURS.find(h => h.hour === dayStartHour)?.label ?? '12am';
+  const minuteLabel = `:${pad(dayStartMinute)}`;
 
   return (
     <View style={styles.wrapper}>
-      <Text style={styles.label}>Day resets at</Text>
+      <Text style={styles.sectionLabel}>Day resets at</Text>
+      <Text style={styles.currentValue}>{hourLabel}{minuteLabel}</Text>
+
+      {/* Hour row */}
+      <Text style={styles.rowLabel}>Hour</Text>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.pills}
       >
-        {OPTIONS.map(({ label, hour }) => {
-          const active = hour === current;
+        {HOURS.map(({ label, hour }) => {
+          const active = hour === dayStartHour;
           return (
-            <Pressable
+            <TouchableOpacity
               key={hour}
               style={[styles.pill, active && styles.pillActive]}
               onPress={() => updateSettings({ dayStartHour: hour })}
@@ -42,12 +54,36 @@ export default function DayStartSetting() {
               <Text style={[styles.pillText, active && styles.pillTextActive]}>
                 {label}
               </Text>
-            </Pressable>
+            </TouchableOpacity>
           );
         })}
       </ScrollView>
+
+      {/* Minute row */}
+      <Text style={styles.rowLabel}>Minute</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.pills}
+      >
+        {MINUTES.map((minute) => {
+          const active = minute === dayStartMinute;
+          return (
+            <TouchableOpacity
+              key={minute}
+              style={[styles.pill, active && styles.pillActive]}
+              onPress={() => updateSettings({ dayStartMinute: minute })}
+            >
+              <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                :{pad(minute)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
       <Text style={styles.hint}>
-        Habits before {OPTIONS.find(o => o.hour === current)?.label ?? '12 am'} count toward the previous day.
+        Anything before {hourLabel}{minuteLabel} counts toward the previous day.
       </Text>
     </View>
   );
@@ -58,25 +94,40 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    gap: 10,
+    gap: 8,
   },
-  label: {
-    fontSize: 14,
+  sectionLabel: {
+    fontSize: 12,
     fontWeight: '600',
-    color: '#888',
+    color: '#aaa',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
+  },
+  currentValue: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#1a1a1a',
+    letterSpacing: -0.5,
+    marginBottom: 4,
+  },
+  rowLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#bbb',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginTop: 4,
   },
   pills: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     paddingVertical: 2,
   },
   pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f5f5f5',
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
@@ -85,9 +136,9 @@ const styles = StyleSheet.create({
     borderColor: '#4CAF50',
   },
   pillText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
-    color: '#666',
+    color: '#777',
   },
   pillTextActive: {
     color: '#2E7D32',
@@ -95,7 +146,8 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
-    color: '#aaa',
+    color: '#bbb',
     fontStyle: 'italic',
+    marginTop: 4,
   },
 });
