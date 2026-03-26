@@ -2,10 +2,10 @@
  * HabitDataContext
  *
  * Single source of truth for all habit data.
- * - Auth   : anonymous sign-in, exposes uid
- * - Remote : Firestore real-time listeners populate local state
- * - Local  : activeTimers are ephemeral (never persisted)
- * - Writes : all mutations go straight to Firestore; listeners reflect changes back
+ * - Auth   : Firebase auth state drives uid
+ * - Remote : Firestore real-time listeners (onSnapshot) populate all state
+ * - Writes : all mutations write to Firestore; listeners reflect changes back
+ * - Timers : activeTimers persisted in Firestore — syncs across devices/tabs
  */
 
 import React, {
@@ -23,6 +23,9 @@ import {
   listenGoals,
   listenEntries,
   listenTimingSegments,
+  listenActiveTimers,
+  startActiveTimer,
+  stopActiveTimer,
   saveRoutine,
   removeRoutine,
   reorderRoutines,
@@ -64,7 +67,7 @@ interface HabitDataCtx {
   setGoalStatus:  (goalId: string, routineId: string, date: string, status: boolean | null) => Promise<void>;
 
   // Timer mutations
-  startTimer:     (targetId: string, targetType: 'goal' | 'routine') => void;
+  startTimer:     (targetId: string, targetType: 'goal' | 'routine') => Promise<void>;
   stopTimer:      (targetId: string) => Promise<void>;
 }
 
@@ -126,6 +129,7 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
       listenGoals(uid, setGoals),
       listenEntries(uid, date, setEntries),
       listenTimingSegments(uid, date, setTimingSegments),
+      listenActiveTimers(uid, setActiveTimers),
     ];
 
     return () => unsubs.forEach((u) => u());
@@ -239,15 +243,13 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     await upsertEntry(uid, { ...entry, completed: status });
   }, [uid, entries]);
 
-  // ── Timer mutations (local only) ──────────────────────────────────────────
+  // ── Timer mutations — Firestore-backed ───────────────────────────────────
 
-  const startTimer = useCallback((targetId: string, targetType: 'goal' | 'routine') => {
-    setActiveTimers((prev) => {
-      // Only one timer per target
-      const filtered = prev.filter((t) => t.targetId !== targetId);
-      return [...filtered, { targetId, targetType, startedAt: nowIso() }];
-    });
-  }, []);
+  const startTimer = useCallback(async (targetId: string, targetType: 'goal' | 'routine') => {
+    if (!uid) return;
+    // Writing to Firestore triggers onSnapshot → setActiveTimers automatically
+    await startActiveTimer(uid, { targetId, targetType, startedAt: nowIso() });
+  }, [uid]);
 
   const stopTimer = useCallback(async (targetId: string) => {
     if (!uid) return;
@@ -260,30 +262,27 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     const durationMs = new Date(endTime).getTime() - new Date(startTime).getTime();
     const date       = today();
 
-    // Remove from active timers immediately
-    setActiveTimers((prev) => prev.filter((t) => t.targetId !== targetId));
+    // Delete from Firestore first — onSnapshot will clear it from UI state
+    await stopActiveTimer(uid, targetId);
 
-    // Check if we can merge with the last segment for this target today
-    const existing = segmentsRef.current
+    // Check if we can merge with the most recent segment for this target today
+    const last = segmentsRef.current
       .filter((s) => s.targetId === targetId && s.date === date)
-      .sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime());
+      .sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime())[0];
 
-    const last = existing[0];
     const gapMs = last
       ? new Date(startTime).getTime() - new Date(last.endTime).getTime()
       : Infinity;
 
     if (last && gapMs < MERGE_GAP_MS) {
-      // Merge: extend the last segment
       const merged: TimingSegment = {
         ...last,
         endTime,
         durationMs: last.durationMs + gapMs + durationMs,
       };
-      await mergeTimingSegments(uid, merged, ''); // empty drop id = just update keep
+      await mergeTimingSegments(uid, merged, last.id);
     } else {
-      // New segment
-      const segment: TimingSegment = {
+      await saveTimingSegment(uid, {
         id: `seg-${uid7()}`,
         targetId,
         targetType: timer.targetType,
@@ -291,8 +290,7 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
         startTime,
         endTime,
         durationMs,
-      };
-      await saveTimingSegment(uid, segment);
+      });
     }
   }, [uid, activeTimers]);
 

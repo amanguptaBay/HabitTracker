@@ -6,8 +6,7 @@
  *   goals/{goalId}
  *   entries/{entryId}
  *   timingSegments/{segmentId}
- *
- * Active timers are ephemeral UI state only — never persisted.
+ *   activeTimers/{targetId}   ← document ID IS the targetId (one per target)
  */
 
 import {
@@ -25,7 +24,7 @@ import {
   DocumentData,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Goal, Routine, Entry, TimingSegment } from '../types';
+import { Goal, Routine, Entry, TimingSegment, ActiveTimer } from '../types';
 
 // ─── Collection helpers ──────────────────────────────────────────────────────
 
@@ -70,6 +69,23 @@ export function listenTimingSegments(
     cb(snap.docs.map((d) => ({ ...(d.data() as TimingSegment), id: d.id })))
   );
 }
+
+// ─── Active timers ───────────────────────────────────────────────────────────
+
+/** Real-time listener — fires immediately with current timers, then on every change. */
+export function listenActiveTimers(uid: string, cb: (data: ActiveTimer[]) => void): Unsubscribe {
+  return onSnapshot(col(uid, 'activeTimers'), (snap) =>
+    cb(snap.docs.map((d) => ({ ...(d.data() as ActiveTimer) })))
+  );
+}
+
+/** Start a timer: write a document keyed by targetId so there's exactly one per target. */
+export const startActiveTimer = (uid: string, timer: ActiveTimer) =>
+  setDoc(ref(uid, 'activeTimers', timer.targetId), strip(timer));
+
+/** Stop a timer: remove the document. Caller is responsible for writing the segment. */
+export const stopActiveTimer = (uid: string, targetId: string) =>
+  deleteDoc(ref(uid, 'activeTimers', targetId));
 
 // ─── Routines ────────────────────────────────────────────────────────────────
 
