@@ -1,17 +1,22 @@
 /**
- * Logical date utilities.
+ * Logical date utilities — all in UTC.
  *
- * A "logical day" starts at dayStartHour:dayStartMinute (user setting).
- * Example: hour=4, minute=30 → anything before 4:30am is "yesterday" logically.
+ * Rule: if UTC time is before dayStartHour:dayStartMinute you are still
+ * in the previous logical day. Once you hit/pass that time you enter the
+ * current UTC calendar day.
+ *
+ * Example: dayStartHour=4, dayStartMinute=0
+ *   03:59 UTC Tuesday  → logical date = 2026-03-24 (Monday)
+ *   04:00 UTC Tuesday  → logical date = 2026-03-25 (Tuesday)
  */
 
-/** Total offset in milliseconds for a given hour + minute boundary. */
 const boundaryOffsetMs = (hour: number, minute: number) =>
   (hour * 60 + minute) * 60_000;
 
 /**
- * Returns the logical date string (YYYY-MM-DD) for a given timestamp.
- * Shifts the timestamp back by the boundary offset before extracting the date.
+ * Returns the logical UTC date (YYYY-MM-DD) for `at`.
+ * Shifts the timestamp back by the boundary offset so anything before
+ * the boundary falls into the previous UTC date.
  */
 export function getLogicalDate(
   dayStartHour: number,
@@ -23,7 +28,7 @@ export function getLogicalDate(
 }
 
 /**
- * Returns the exact UTC timestamp of the next logical day boundary after `after`.
+ * Returns the exact UTC timestamp of the next day boundary strictly after `after`.
  */
 export function nextDayBoundary(
   dayStartHour: number,
@@ -32,9 +37,11 @@ export function nextDayBoundary(
 ): Date {
   const boundary = new Date(after);
   boundary.setUTCHours(dayStartHour, dayStartMinute, 0, 0);
+
   if (boundary <= after) {
     boundary.setUTCDate(boundary.getUTCDate() + 1);
   }
+
   return boundary;
 }
 
@@ -50,8 +57,8 @@ export function splitByLogicalDay(
 ): Array<{ date: string; startTime: string; endTime: string; durationMs: number }> {
   const chunks: Array<{ date: string; startTime: string; endTime: string; durationMs: number }> = [];
 
-  let cursor   = new Date(startTime);
-  const end    = new Date(endTime);
+  let cursor = new Date(startTime);
+  const end  = new Date(endTime);
 
   while (cursor < end) {
     const chunkDate  = getLogicalDate(dayStartHour, dayStartMinute, cursor);
