@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useHabitData } from '../context/HabitDataContext';
 import { Goal, Routine } from '../types';
+import { getLogicalDate } from '../utils/date';
 import GoalCard from '../components/GoalCard';
 import RoutineCard from '../components/RoutineCard';
 import { RootStackParamList } from '../navigation/types';
@@ -32,11 +33,11 @@ function formatViewingDate(s: string, isToday: boolean): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** Shift a YYYY-MM-DD string by ±1 day. */
-function shiftDate(s: string, days: number): string {
+/** Shift a YYYY-MM-DD string by ±1 day, returning a timezone-aware logical date. */
+function shiftDate(s: string, days: number, timezone: string): string {
   const d = dateFromString(s);
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return getLogicalDate(timezone, d);
 }
 
 export default function HomeScreen() {
@@ -44,7 +45,7 @@ export default function HomeScreen() {
   const {
     loading, logicalToday, viewingDate, setViewingDate,
     routines, goals, entries, timingSegments, activeTimers,
-    setGoalStatus, startTimer, stopTimer,
+    setGoalStatus, startTimer, stopTimer, settings,
   } = useHabitData();
 
   const [showPicker, setShowPicker] = useState(false);
@@ -121,7 +122,7 @@ export default function HomeScreen() {
         {/* Prev */}
         <Pressable
           style={styles.navArrow}
-          onPress={() => setViewingDate(shiftDate(viewingDate, -1))}
+          onPress={() => setViewingDate(shiftDate(viewingDate, -1, settings.timezone))}
           hitSlop={8}
         >
           <Text style={styles.navArrowText}>‹</Text>
@@ -130,13 +131,18 @@ export default function HomeScreen() {
         {/* Calendar picker button */}
         <Pressable style={styles.calBtn} onPress={() => setShowPicker(true)}>
           <Text style={styles.calIcon}>📅</Text>
+          {isToday && (
+            <View style={styles.todayPill}>
+              <Text style={styles.todayPillText}>Today</Text>
+            </View>
+          )}
           {!isToday && (
             <Pressable
-              style={styles.todayPill}
+              style={[styles.todayPill, styles.todayPillNav]}
               onPress={() => setViewingDate(logicalToday)}
               hitSlop={4}
             >
-              <Text style={styles.todayPillText}>Today</Text>
+              <Text style={styles.todayPillText}>↩ Today</Text>
             </Pressable>
           )}
         </Pressable>
@@ -144,7 +150,7 @@ export default function HomeScreen() {
         {/* Next */}
         <Pressable
           style={styles.navArrow}
-          onPress={() => setViewingDate(shiftDate(viewingDate, 1))}
+          onPress={() => setViewingDate(shiftDate(viewingDate, 1, settings.timezone))}
           hitSlop={8}
         >
           <Text style={styles.navArrowText}>›</Text>
@@ -160,7 +166,7 @@ export default function HomeScreen() {
           onChange={(_, selected) => {
             if (Platform.OS !== 'ios') setShowPicker(false);
             if (selected) {
-              setViewingDate(selected.toISOString().split('T')[0]);
+              setViewingDate(getLogicalDate(settings.timezone, selected));
             }
           }}
           onTouchCancel={() => setShowPicker(false)}
@@ -294,6 +300,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 3,
+  },
+  todayPillNav: {
+    backgroundColor: '#888',
   },
   todayPillText: {
     fontSize: 12,
