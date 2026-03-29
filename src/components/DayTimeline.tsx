@@ -12,7 +12,9 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS, useSharedValue } from 'react-native-reanimated';
 import { ActiveTimer, Goal, Routine, TimingSegment } from '../types';
 
 interface Props {
@@ -27,14 +29,51 @@ interface Props {
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const HOUR_H    = 64;
-const TOTAL_H   = 24 * HOUR_H;   // 1536 px
-const GUTTER    = 52;
-// TIMELINE_W is the pixel width available to blocks inside the timeline column.
-// On most phones the timeline takes the remaining screen width after the gutter.
-// We use a runtime value via onLayout for accuracy, but fall back to a safe default.
-// Overlap tiling uses this to compute per-column widths.
+const BASE_HOUR_H = 64;          // default pixels per hour
+const MIN_HOUR_H  = 16;          // fully zoomed out  (~26 h visible at once)
+const MAX_HOUR_H  = 720;         // fully zoomed in   (~5 min visible at once)
+const GUTTER      = 52;
 const TIMELINE_W_FALLBACK = 320;
+
+// ─── Adaptive grid helpers ────────────────────────────────────────────────────
+
+/**
+ * How many minutes between each grid line at this zoom level.
+ * Chosen so lines are never denser than ~4 px apart.
+ */
+function tickMins(hourH: number): number {
+  const pxPerMin = hourH / 60;
+  if (pxPerMin >= 8)  return 1;
+  if (pxPerMin >= 2)  return 5;
+  if (pxPerMin >= 1)  return 15;
+  if (pxPerMin >= 0.5) return 30;
+  return 60;
+}
+
+/**
+ * How many minutes between visible time labels.
+ * Chosen so labels are never closer than ~28 px.
+ */
+function labelMins(hourH: number): number {
+  if (hourH >= 480) return 10;
+  if (hourH >= 200) return 15;
+  if (hourH >= 100) return 30;
+  if (hourH >= 48)  return 60;
+  if (hourH >= 24)  return 120;
+  return 240;
+}
+
+/** Format total-minutes offset since midnight as a clock string. */
+function fmtMinOffset(totalMins: number): string {
+  const h = Math.floor(totalMins / 60) % 24;
+  const m = totalMins % 60;
+  if (m === 0) {
+    const ampm = h < 12 ? 'am' : 'pm';
+    const h12  = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}${ampm}`;
+  }
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
 // ─── Core: UTC ms of midnight for a given YYYY-MM-DD in a timezone ───────────
 
@@ -56,16 +95,11 @@ function midnightUTC(dateStr: string, tz: string): number {
 
 // ─── Layout helpers ───────────────────────────────────────────────────────────
 
-/** Convert elapsed minutes since local midnight → px from top of timeline */
-function minsToY(elapsedMins: number): number {
-  return (elapsedMins / 60) * HOUR_H;
-}
-
-/** Position a UTC ISO string on the day grid given the midnight anchor */
-function isoToY(iso: string, midnight: number): number {
+/** Position a UTC ISO string on the day grid given the midnight anchor and hourH. */
+function isoToY(iso: string, midnight: number, hourH: number): number {
   const elapsedMs   = new Date(iso).getTime() - midnight;
-  const elapsedMins = elapsedMs / 60_000;
-  return minsToY(Math.max(0, elapsedMins));
+  const elapsedMins = Math.max(0, elapsedMs / 60_000);
+  return (elapsedMins / 60) * hourH;
 }
 
 
@@ -191,6 +225,62 @@ export default function DayTimeline({
     [],
   );
 
+  // ── Zoom state ─────────────────────────────────────────────────────────────
+  const [hourH, setHourHState] = useState(BASE_HOUR_H);
+  const hourHRef    = useRef(BASE_HOUR_H);   // sync access from gesture handler
+  const scrollYRef  = useRef(0);             // current scroll offset (manual tracking)
+  const pinchBaseH  = useSharedValue(BASE_HOUR_H); // hourH at gesture start (UI thread)
+
+  // Keep pinchBaseH in sync so the next gesture starts from the right value
+  useEffect(() => { pinchBaseH.value = hourH; }, [hourH, pinchBaseH]);
+
+  const applyZoom = useCallback((newH: number, focalY: number) => {
+    const oldH      = hourHRef.current;
+    const timeMins  = (scrollYRef.current + focalY) * 60 / oldH;
+    const newScroll = Math.max(0, timeMins * newH / 60 - focalY);
+    hourHRef.current  = newH;
+    scrollYRef.current = newScroll;
+    setHourHState(newH);
+    scrollRef.current?.scrollTo({ y: newScroll, animated: false });
+  }, []);
+
+  const pinchGesture = Gesture.Pinch()
+    .onStart(() => { pinchBaseH.value = hourHRef.current; })
+    .onUpdate((e) => {
+      const clamped = Math.min(MAX_HOUR_H, Math.max(MIN_HOUR_H,
+        Math.round(pinchBaseH.value * e.scale)));
+      runOnJS(applyZoom)(clamped, e.focalY);
+    });
+
+  // ── Web: Ctrl/Cmd + scroll wheel zoom (also fires from trackpad pinch on web) ──
+  const containerRef = useRef<View>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const node = containerRef.current as unknown as HTMLElement | null;
+    if (!node) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault(); // stop browser from zooming the page
+      // deltaY > 0 → zoom out, < 0 → zoom in
+      const factor   = e.deltaY > 0 ? 0.85 : 1 / 0.85;
+      const newH     = Math.min(MAX_HOUR_H, Math.max(MIN_HOUR_H, Math.round(hourHRef.current * factor)));
+      const rect     = node.getBoundingClientRect();
+      applyZoom(newH, e.clientY - rect.top);
+    };
+
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => node.removeEventListener('wheel', onWheel);
+  }, [applyZoom]);
+
+  // Derived layout values
+  const totalH   = hourH * 24;
+  const minsToY  = (m: number) => (m / 60) * hourH;
+  const tick     = tickMins(hourH);
+  const lblStep  = labelMins(hourH);
+  const tickCount = Math.floor(24 * 60 / tick);
+  const lblCount  = Math.floor(24 * 60 / lblStep);
+
   // UTC ms of local midnight for the day being viewed — recompute when date or tz changes
   const midnight = useMemo(
     () => midnightUTC(viewingDate, timezone),
@@ -221,13 +311,15 @@ export default function DayTimeline({
     routines.find((r) => r.id === id)?.name ??
     id;
 
+  const minBlockH = Math.max(4, hourH / 16); // min block height scales with zoom
+
   const completedBlocks: Block[] = timingSegments.flatMap((seg) =>
     (seg.segments ?? []).map((run, i) => ({
       id:         `${seg.targetId}-${i}`,
       label:      labelFor(seg.targetId),
       color:      blockColor(seg.targetId),
-      topY:       isoToY(run.startTime, midnight),
-      heightPx:   Math.max(28, (run.durationMs / 3_600_000) * HOUR_H),
+      topY:       isoToY(run.startTime, midnight, hourH),
+      heightPx:   Math.max(minBlockH, (run.durationMs / 3_600_000) * hourH),
       durationMs: run.durationMs,
       timeLabel:  fmtLocalTime(run.startTime, midnight, timezone),
       isLive:     false,
@@ -240,8 +332,8 @@ export default function DayTimeline({
       id:         `live-${t.targetId}`,
       label:      labelFor(t.targetId),
       color:      blockColor(t.targetId),
-      topY:       isoToY(t.startedAt, midnight),
-      heightPx:   Math.max(28, (durationMs / 3_600_000) * HOUR_H),
+      topY:       isoToY(t.startedAt, midnight, hourH),
+      heightPx:   Math.max(minBlockH, (durationMs / 3_600_000) * hourH),
       durationMs,
       timeLabel:  fmtLocalTime(t.startedAt, midnight, timezone),
       isLive:     true,
@@ -250,56 +342,52 @@ export default function DayTimeline({
 
   const allBlocks: LayoutBlock[] = assignColumns([...completedBlocks, ...liveBlocks]);
 
-  // ── DEBUG ─────────────────────────────────────────────────────────────────
-  console.log('[DayTimeline] viewingDate:', viewingDate, '| timezone:', timezone);
-  console.log('[DayTimeline] midnight UTC ms:', midnight, '→', new Date(midnight).toISOString());
-  console.log('[DayTimeline] timingSegments count:', timingSegments.length);
-  timingSegments.forEach((seg) => {
-    console.log('  seg targetId:', seg.targetId, '| totalMs:', seg.totalMs, '| runs:', seg.segments?.length ?? 0);
-    (seg.segments ?? []).forEach((run, i) => {
-      const topY = isoToY(run.startTime, midnight);
-      console.log(`    run[${i}] startTime:`, run.startTime, '| durationMs:', run.durationMs, '| topY:', topY);
-    });
-  });
-  console.log('[DayTimeline] allBlocks:', allBlocks.map(b => ({ id: b.id, topY: b.topY, heightPx: b.heightPx, label: b.label })));
-  // ─────────────────────────────────────────────────────────────────────────
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
+    <GestureDetector gesture={pinchGesture}>
+    <View ref={containerRef} style={styles.outerContainer}>
     <ScrollView
       ref={scrollRef}
       style={styles.scroll}
       showsVerticalScrollIndicator={false}
+      onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+      scrollEventThrottle={16}
     >
       {/* Single View — height drives scroll; row lays out gutter + timeline */}
-      <View style={styles.dayView}>
+      <View style={[styles.dayView, { height: totalH }]}>
 
-        {/* Hour labels */}
+        {/* Adaptive time labels in gutter */}
         <View style={styles.gutter}>
-          {Array.from({ length: 25 }, (_, h) => (
-            <View
-              key={h}
-              style={[styles.hourLabelRow, { top: h * HOUR_H - 7 }]}
-            >
-              <Text style={styles.hourText}>
-                {`${String(h === 24 ? 0 : h).padStart(2, '0')}:00`}
-              </Text>
-            </View>
-          ))}
+          {Array.from({ length: lblCount + 1 }, (_, i) => {
+            const mins = i * lblStep;
+            if (mins > 24 * 60) return null;
+            return (
+              <View key={mins} style={[styles.hourLabelRow, { top: minsToY(mins) - 7 }]}>
+                <Text style={styles.hourText}>{fmtMinOffset(mins)}</Text>
+              </View>
+            );
+          })}
         </View>
 
         {/* Timeline */}
-        <View style={styles.timeline} onLayout={onTimelineLayout}>
+        <View style={[styles.timeline, { height: totalH }]} onLayout={onTimelineLayout}>
 
-          {/* Hour grid lines */}
-          {Array.from({ length: 25 }, (_, h) => (
-            <View key={h} style={[styles.hourLine, { top: h * HOUR_H }]} />
-          ))}
-
-          {/* Half-hour ticks */}
-          {Array.from({ length: 24 }, (_, h) => (
-            <View key={h} style={[styles.halfLine, { top: h * HOUR_H + HOUR_H / 2 }]} />
-          ))}
+          {/* Adaptive grid lines */}
+          {Array.from({ length: tickCount + 1 }, (_, i) => {
+            const mins = i * tick;
+            if (mins > 24 * 60) return null;
+            const isHour = mins % 60 === 0;
+            return (
+              <View
+                key={mins}
+                style={[
+                  isHour ? styles.hourLine : styles.tickLine,
+                  { top: minsToY(mins) },
+                ]}
+              />
+            );
+          })}
 
           {/* Blocks */}
           {allBlocks.map((block) => {
@@ -346,18 +434,23 @@ export default function DayTimeline({
         </View>
       </View>
     </ScrollView>
+    </View>
+    </GestureDetector>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  outerContainer: {
+    flex: 1,
+  },
   scroll: {
     flex:            1,
     backgroundColor: '#ffffff',
   },
   dayView: {
-    height:        TOTAL_H,
+    // height is set inline (totalH = hourH * 24, changes with zoom)
     flexDirection: 'row',
   },
 
@@ -382,7 +475,7 @@ const styles = StyleSheet.create({
   // Timeline column
   timeline: {
     flex:            1,
-    height:          TOTAL_H,
+    // height set inline
     position:        'relative',
     borderLeftWidth: StyleSheet.hairlineWidth,
     borderLeftColor: '#e0e0e0',
@@ -393,14 +486,14 @@ const styles = StyleSheet.create({
     left:            0,
     right:           0,
     height:          StyleSheet.hairlineWidth,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: '#d0d0d0',
   },
-  halfLine: {
+  tickLine: {
     position:        'absolute',
     left:            0,
     right:           0,
     height:          StyleSheet.hairlineWidth,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#ebebeb',
   },
 
   // Blocks
