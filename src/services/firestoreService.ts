@@ -20,6 +20,7 @@ import {
   onSnapshot,
   writeBatch,
   arrayUnion,
+  arrayRemove,
   increment,
   query,
   where,
@@ -167,13 +168,40 @@ export const upsertTimingSegment = (
   run: TimingRun,
 ) => {
   const segRef = doc(db, 'users', uid, 'dates', date, 'timingSegments', targetId);
+  // Store only the 3 fields that define a run — date is already in the doc path.
+  // Keeping date OUT of the run object means arrayRemove can match exactly.
+  const runPayload: TimingRun = {
+    startTime:  run.startTime,
+    endTime:    run.endTime,
+    durationMs: run.durationMs,
+  };
   return setDoc(segRef, {
     targetId,
     targetType,
     date,
-    totalMs:  increment(run.durationMs),
-    segments: arrayUnion(run),
+    totalMs:  increment(runPayload.durationMs),
+    segments: arrayUnion(runPayload),
   }, { merge: true });
+};
+
+/**
+ * Remove one specific run from a timing segment document and decrement totalMs.
+ * Uses arrayRemove — Firestore matches the exact object by value equality.
+ */
+export const deleteTimingRun = (
+  uid: string,
+  date: string,
+  targetId: string,
+  run: TimingRun,
+) => {
+  const segRef = doc(db, 'users', uid, 'dates', date, 'timingSegments', targetId);
+  const path = `users/${uid}/dates/${date}/timingSegments/${targetId}`;
+  console.log('[firestoreService] deleteTimingRun path:', path);
+  console.log('[firestoreService] arrayRemove payload:', JSON.stringify(run));
+  return updateDoc(segRef, {
+    segments: arrayRemove(run),
+    totalMs:  increment(-run.durationMs),
+  });
 };
 
 // ─── User settings ───────────────────────────────────────────────────────────

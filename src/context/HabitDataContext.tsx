@@ -28,6 +28,7 @@ import {
   saveSettings,
   startActiveTimer,
   stopActiveTimer,
+  deleteTimingRun,
   saveRoutine,
   removeRoutine,
   reorderRoutines,
@@ -76,8 +77,9 @@ interface HabitDataCtx {
   updateSettings: (s: Partial<UserSettings>) => Promise<void>;
 
   // Timer mutations
-  startTimer:     (targetId: string, targetType: 'goal' | 'routine') => Promise<void>;
-  stopTimer:      (targetId: string) => Promise<void>;
+  startTimer:        (targetId: string, targetType: 'goal' | 'routine') => Promise<void>;
+  stopTimer:         (targetId: string) => Promise<void>;
+  deleteRun:         (date: string, targetId: string, run: import('../types').TimingRun) => Promise<void>;
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -307,6 +309,18 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     }
   }, [uid, activeTimers]);
 
+  const deleteRun = useCallback(async (
+    date: string,
+    targetId: string,
+    run: import('../types').TimingRun,
+  ) => {
+    console.log('[HabitDataContext] deleteRun called — uid:', uid, 'date:', date, 'targetId:', targetId);
+    console.log('[HabitDataContext] run payload:', JSON.stringify(run));
+    if (!uid) { console.warn('[HabitDataContext] deleteRun: no uid, aborting'); return; }
+    await deleteTimingRun(uid, date, targetId, run);
+    console.log('[HabitDataContext] deleteTimingRun completed');
+  }, [uid]);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
@@ -318,7 +332,7 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
       addGoal, updateGoal, deleteGoal, moveGoal,
       setGoalStatus,
       updateSettings,
-      startTimer, stopTimer,
+      startTimer, stopTimer, deleteRun,
     }}>
       {children}
     </Ctx.Provider>

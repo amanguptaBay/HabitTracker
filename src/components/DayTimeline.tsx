@@ -12,10 +12,11 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useSharedValue } from 'react-native-reanimated';
-import { ActiveTimer, Goal, Routine, TimingSegment } from '../types';
+import { ActiveTimer, Goal, Routine, TimingRun, TimingSegment } from '../types';
+import { useHabitData } from '../context/HabitDataContext';
 
 interface Props {
   timingSegments: TimingSegment[];
@@ -114,6 +115,15 @@ function fmtDuration(ms: number): string {
   return `${s}s`;
 }
 
+/** HH:MM:SS for the modal duration display */
+function fmtDurationHMS(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 /** Format a UTC ISO string as a local clock time (e.g. "8:30 AM") */
 function fmtLocalTime(iso: string, midnight: number, tz: string): string {
   // Derive HH:MM from the elapsed minutes since midnight — no Intl time parsing needed
@@ -143,13 +153,19 @@ function blockColor(targetId: string): string {
 interface Block {
   id:         string;
   label:      string;
+  targetId:   string;
   color:      string;
   topY:       number;
   heightPx:   number;
   durationMs: number;
   timeLabel:  string;
-  isLive:     boolean;
-  isGhost:    boolean;   // true when block was inflated to minimum height
+  endTimeLabel: string;
+  isLive:      boolean;
+  isGhost:     boolean;
+  isCrossDay:  boolean;  // chunk from an overnight timer — started at midnight
+  // For deletion — null on live blocks
+  run:        TimingRun | null;
+  runDate:    string;
 }
 
 interface LayoutBlock extends Block {
@@ -218,6 +234,10 @@ export default function DayTimeline({
   viewingDate,
   isToday,
 }: Props) {
+  const { deleteRun } = useHabitData();
+  const [selectedBlock, setSelectedBlock] = useState<LayoutBlock | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   const scrollRef  = useRef<ScrollView>(null);
   const [timelineW, setTimelineW] = useState(TIMELINE_W_FALLBACK);
   const onTimelineLayout = useCallback(
@@ -316,18 +336,25 @@ export default function DayTimeline({
 
   const completedBlocks: Block[] = timingSegments.flatMap((seg) =>
     (seg.segments ?? []).map((run, i) => {
-      const naturalH = (run.durationMs / 3_600_000) * hourH;
-      const heightPx = Math.max(minBlockH, naturalH);
+      const naturalH   = (run.durationMs / 3_600_000) * hourH;
+      const heightPx   = Math.max(minBlockH, naturalH);
+      // Within 2 s of midnight → this is the tail of an overnight split
+      const isCrossDay = new Date(run.startTime).getTime() - midnight < 2_000;
       return {
-        id:         `${seg.targetId}-${i}`,
-        label:      labelFor(seg.targetId),
-        color:      blockColor(seg.targetId),
-        topY:       isoToY(run.startTime, midnight, hourH),
+        id:           `${seg.targetId}-${i}`,
+        label:        labelFor(seg.targetId),
+        targetId:     seg.targetId,
+        color:        blockColor(seg.targetId),
+        topY:         isoToY(run.startTime, midnight, hourH),
         heightPx,
-        durationMs: run.durationMs,
-        timeLabel:  fmtLocalTime(run.startTime, midnight, timezone),
-        isLive:     false,
-        isGhost:    naturalH < minBlockH,
+        durationMs:   run.durationMs,
+        timeLabel:    fmtLocalTime(run.startTime, midnight, timezone),
+        endTimeLabel: fmtLocalTime(run.endTime,   midnight, timezone),
+        isLive:       false,
+        isGhost:      naturalH < minBlockH,
+        isCrossDay,
+        run,
+        runDate:      seg.date,
       };
     })
   );
@@ -337,15 +364,20 @@ export default function DayTimeline({
     const naturalH   = (durationMs / 3_600_000) * hourH;
     const heightPx   = Math.max(minBlockH, naturalH);
     return {
-      id:         `live-${t.targetId}`,
-      label:      labelFor(t.targetId),
-      color:      blockColor(t.targetId),
-      topY:       isoToY(t.startedAt, midnight, hourH),
+      id:           `live-${t.targetId}`,
+      label:        labelFor(t.targetId),
+      targetId:     t.targetId,
+      color:        blockColor(t.targetId),
+      topY:         isoToY(t.startedAt, midnight, hourH),
       heightPx,
       durationMs,
-      timeLabel:  fmtLocalTime(t.startedAt, midnight, timezone),
-      isLive:     true,
-      isGhost:    naturalH < minBlockH,
+      timeLabel:    fmtLocalTime(t.startedAt, midnight, timezone),
+      endTimeLabel: 'now',
+      isLive:       true,
+      isGhost:      naturalH < minBlockH,
+      isCrossDay:   false,
+      run:          null,
+      runDate:      viewingDate,
     };
   });
 
@@ -354,6 +386,7 @@ export default function DayTimeline({
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
+    <>
     <GestureDetector gesture={pinchGesture}>
     <View ref={containerRef} style={styles.outerContainer}>
     <ScrollView
@@ -400,37 +433,38 @@ export default function DayTimeline({
 
           {/* Blocks */}
           {allBlocks.map((block) => {
-            const GAP        = 2;                          // px gap between tiled columns
+            const GAP        = 2;
             const totalGap   = GAP * (block.numCols - 1);
-            const colW       = (timelineW - 8 - totalGap) / block.numCols; // 4px margin each side
+            const colW       = (timelineW - 8 - totalGap) / block.numCols;
             const blockLeft  = 4 + block.col * (colW + GAP);
             const blockRight = 4 + (block.numCols - block.col - 1) * (colW + GAP);
             return (
-            <View
-              key={block.id}
-              style={[
-                styles.block,
-                {
-                  top:             block.topY + 1,
-                  height:          block.heightPx - 2,
-                  left:            blockLeft,
-                  right:           blockRight,
-                  backgroundColor: block.color,
-                  opacity:         block.isGhost ? 0.35 : 1,
-                },
-                block.isLive && styles.blockLive,
-                block.isGhost && styles.blockGhost,
-              ]}
-            >
-              <Text style={styles.blockName} numberOfLines={1}>
-                {block.isLive ? '▶ ' : ''}{block.label}
-              </Text>
-              {block.heightPx >= 44 && (
-                <Text style={styles.blockMeta} numberOfLines={1}>
-                  {block.timeLabel} · {fmtDuration(block.durationMs)}
+              <Pressable
+                key={block.id}
+                onPress={() => setSelectedBlock(block)}
+                style={[
+                  styles.block,
+                  {
+                    top:             block.topY + 1,
+                    height:          block.heightPx - 2,
+                    left:            blockLeft,
+                    right:           blockRight,
+                    backgroundColor: block.color,
+                    opacity:         block.isGhost ? 0.35 : 1,
+                  },
+                  block.isLive && styles.blockLive,
+                  block.isGhost && styles.blockGhost,
+                ]}
+              >
+                <Text style={styles.blockName} numberOfLines={1}>
+                  {block.isLive ? '▶ ' : ''}{block.isCrossDay ? '↩ ' : ''}{block.label}
                 </Text>
-              )}
-            </View>
+                {block.heightPx >= 44 && (
+                  <Text style={styles.blockMeta} numberOfLines={1}>
+                    {block.timeLabel} · {fmtDuration(block.durationMs)}
+                  </Text>
+                )}
+              </Pressable>
             );
           })}
 
@@ -447,6 +481,114 @@ export default function DayTimeline({
     </ScrollView>
     </View>
     </GestureDetector>
+
+    {/* Block detail modal */}
+    <Modal
+      visible={selectedBlock !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={() => { setSelectedBlock(null); setConfirmingDelete(false); }}
+    >
+      <Pressable style={styles.modalBackdrop} onPress={() => { setSelectedBlock(null); setConfirmingDelete(false); }}>
+        <Pressable style={styles.modalCard} onPress={() => {}}>
+          {selectedBlock && (
+            <>
+              {/* Colour stripe */}
+              <View style={[styles.modalStripe, { backgroundColor: selectedBlock.color }]} />
+
+              <View style={styles.modalBody}>
+                {/* ID */}
+                <Text style={styles.modalId}>{selectedBlock.targetId}</Text>
+
+                {/* Name */}
+                <Text style={styles.modalName}>{selectedBlock.label}</Text>
+
+                {/* Duration */}
+                <Text style={styles.modalDuration}>
+                  {fmtDurationHMS(selectedBlock.durationMs)}
+                </Text>
+
+                {/* Meta */}
+                <View style={styles.modalMeta}>
+                  <Text style={styles.modalMetaText}>
+                    Start  {selectedBlock.timeLabel}
+                  </Text>
+                  <Text style={styles.modalMetaText}>
+                    End    {selectedBlock.endTimeLabel}
+                  </Text>
+                  <Text style={styles.modalMetaText}>
+                    Date   {selectedBlock.runDate}
+                  </Text>
+                  {selectedBlock.isLive && (
+                    <Text style={[styles.modalMetaText, { color: '#2e7d32' }]}>
+                      ▶ Running
+                    </Text>
+                  )}
+                  {selectedBlock.isGhost && (
+                    <Text style={[styles.modalMetaText, { color: '#9e9e9e' }]}>
+                      Short run (inflated for visibility)
+                    </Text>
+                  )}
+                  {selectedBlock.isCrossDay && (
+                    <Text style={[styles.modalMetaText, { color: '#1565c0' }]}>
+                      ↩ Continued from previous day
+                    </Text>
+                  )}
+                </View>
+
+                {/* Delete */}
+                {!selectedBlock.isLive && selectedBlock.run && (
+                  confirmingDelete ? (
+                    <View style={styles.confirmRow}>
+                      <Text style={styles.confirmText}>Remove this run?</Text>
+                      <View style={styles.confirmBtns}>
+                        <Pressable
+                          style={styles.confirmCancel}
+                          onPress={() => setConfirmingDelete(false)}
+                        >
+                          <Text style={styles.confirmCancelText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.confirmDelete}
+                          onPress={async () => {
+                            console.log('[DayTimeline] delete confirmed');
+                            console.log('  runDate:', selectedBlock.runDate);
+                            console.log('  targetId:', selectedBlock.targetId);
+                            console.log('  run:', JSON.stringify(selectedBlock.run));
+                            try {
+                              await deleteRun(selectedBlock.runDate, selectedBlock.targetId, selectedBlock.run!);
+                              console.log('[DayTimeline] deleteRun resolved OK');
+                              setConfirmingDelete(false);
+                              setSelectedBlock(null);
+                            } catch (e) {
+                              console.error('[DayTimeline] deleteRun threw:', e);
+                            }
+                          }}
+                        >
+                          <Text style={styles.confirmDeleteText}>Delete</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={styles.deleteBtn}
+                      onPress={() => setConfirmingDelete(true)}
+                    >
+                      <Text style={styles.deleteBtnText}>Delete this run</Text>
+                    </Pressable>
+                  )
+                )}
+
+                <Pressable style={styles.closeBtn} onPress={() => setSelectedBlock(null)}>
+                  <Text style={styles.closeBtnText}>Close</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
+    </>
   );
 }
 
@@ -534,6 +676,121 @@ const styles = StyleSheet.create({
     fontSize:  10,
     color:     'rgba(255,255,255,0.8)',
     marginTop: 2,
+  },
+
+  // Modal
+  modalBackdrop: {
+    flex:            1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent:  'center',
+    alignItems:      'center',
+    padding:         24,
+  },
+  modalCard: {
+    width:           '100%',
+    maxWidth:        400,
+    backgroundColor: '#fff',
+    borderRadius:    16,
+    overflow:        'hidden',
+    shadowColor:     '#000',
+    shadowOpacity:   0.2,
+    shadowRadius:    12,
+    shadowOffset:    { width: 0, height: 4 },
+    elevation:       8,
+  },
+  modalStripe: {
+    height: 6,
+  },
+  modalBody: {
+    padding: 20,
+  },
+  modalId: {
+    fontSize:    11,
+    color:       '#9e9e9e',
+    fontFamily:  'monospace',
+    marginBottom: 4,
+  },
+  modalName: {
+    fontSize:     22,
+    fontWeight:   '700',
+    color:        '#212121',
+    marginBottom: 6,
+  },
+  modalDuration: {
+    fontSize:     32,
+    fontWeight:   '300',
+    color:        '#212121',
+    letterSpacing: 1,
+    marginBottom:  16,
+    fontVariant:  ['tabular-nums'],
+  },
+  modalMeta: {
+    gap:          6,
+    marginBottom: 20,
+  },
+  modalMetaText: {
+    fontSize: 13,
+    color:    '#616161',
+  },
+  deleteBtn: {
+    backgroundColor: '#ffebee',
+    borderRadius:    10,
+    paddingVertical: 12,
+    alignItems:      'center',
+    marginBottom:    10,
+  },
+  deleteBtnText: {
+    fontSize:   14,
+    fontWeight: '600',
+    color:      '#c62828',
+  },
+  confirmRow: {
+    marginBottom: 10,
+  },
+  confirmText: {
+    fontSize:     13,
+    color:        '#c62828',
+    marginBottom: 8,
+    textAlign:    'center',
+  },
+  confirmBtns: {
+    flexDirection: 'row',
+    gap:           8,
+  },
+  confirmCancel: {
+    flex:            1,
+    backgroundColor: '#f5f5f5',
+    borderRadius:    10,
+    paddingVertical: 11,
+    alignItems:      'center',
+  },
+  confirmCancelText: {
+    fontSize:   14,
+    fontWeight: '500',
+    color:      '#424242',
+  },
+  confirmDelete: {
+    flex:            1,
+    backgroundColor: '#c62828',
+    borderRadius:    10,
+    paddingVertical: 11,
+    alignItems:      'center',
+  },
+  confirmDeleteText: {
+    fontSize:   14,
+    fontWeight: '600',
+    color:      '#fff',
+  },
+  closeBtn: {
+    backgroundColor: '#f5f5f5',
+    borderRadius:    10,
+    paddingVertical: 12,
+    alignItems:      'center',
+  },
+  closeBtnText: {
+    fontSize:   14,
+    fontWeight: '500',
+    color:      '#424242',
   },
 
   // Now indicator
