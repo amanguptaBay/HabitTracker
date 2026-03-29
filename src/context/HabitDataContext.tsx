@@ -29,6 +29,7 @@ import {
   startActiveTimer,
   stopActiveTimer,
   deleteTimingRun,
+  updateTimingRun,
   saveRoutine,
   removeRoutine,
   reorderRoutines,
@@ -80,6 +81,7 @@ interface HabitDataCtx {
   startTimer:        (targetId: string, targetType: 'goal' | 'routine') => Promise<void>;
   stopTimer:         (targetId: string) => Promise<void>;
   deleteRun:         (date: string, targetId: string, run: import('../types').TimingRun) => Promise<void>;
+  updateRun:         (date: string, targetId: string, oldRun: import('../types').TimingRun, newRun: import('../types').TimingRun) => Promise<void>;
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -314,11 +316,18 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     targetId: string,
     run: import('../types').TimingRun,
   ) => {
-    console.log('[HabitDataContext] deleteRun called — uid:', uid, 'date:', date, 'targetId:', targetId);
-    console.log('[HabitDataContext] run payload:', JSON.stringify(run));
-    if (!uid) { console.warn('[HabitDataContext] deleteRun: no uid, aborting'); return; }
+    if (!uid) return;
     await deleteTimingRun(uid, date, targetId, run);
-    console.log('[HabitDataContext] deleteTimingRun completed');
+  }, [uid]);
+
+  const updateRun = useCallback(async (
+    date: string,
+    targetId: string,
+    oldRun: import('../types').TimingRun,
+    newRun: import('../types').TimingRun,
+  ) => {
+    if (!uid) return;
+    await updateTimingRun(uid, date, targetId, oldRun, newRun);
   }, [uid]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -332,7 +341,7 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
       addGoal, updateGoal, deleteGoal, moveGoal,
       setGoalStatus,
       updateSettings,
-      startTimer, stopTimer, deleteRun,
+      startTimer, stopTimer, deleteRun, updateRun,
     }}>
       {children}
     </Ctx.Provider>

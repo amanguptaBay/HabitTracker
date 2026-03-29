@@ -185,6 +185,29 @@ export const upsertTimingSegment = (
 };
 
 /**
+ * Replace one run in a timing segment document with an edited version.
+ * Atomically removes the old run, adds the new one, and adjusts totalMs.
+ */
+export const updateTimingRun = (
+  uid: string,
+  date: string,
+  targetId: string,
+  oldRun: TimingRun,
+  newRun: TimingRun,
+) => {
+  const segRef = doc(db, 'users', uid, 'dates', date, 'timingSegments', targetId);
+  return updateDoc(segRef, {
+    segments: arrayRemove(oldRun),
+    totalMs:  increment(-oldRun.durationMs),
+  }).then(() =>
+    updateDoc(segRef, {
+      segments: arrayUnion(newRun),
+      totalMs:  increment(newRun.durationMs),
+    })
+  );
+};
+
+/**
  * Remove one specific run from a timing segment document and decrement totalMs.
  * Uses arrayRemove — Firestore matches the exact object by value equality.
  */

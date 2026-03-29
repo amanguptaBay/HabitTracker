@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS, useSharedValue } from 'react-native-reanimated';
 import { ActiveTimer, Goal, Routine, TimingRun, TimingSegment } from '../types';
@@ -223,6 +223,30 @@ function assignColumns(blocks: Block[]): LayoutBlock[] {
   return assigned;
 }
 
+// ─── Edit-time helpers ────────────────────────────────────────────────────────
+
+/** Convert a UTC ISO string to "HH:MM" in the user's timezone, given midnight UTC ms. */
+function isoToHHMM(iso: string, midnight: number): string {
+  const elapsedMins = Math.round((new Date(iso).getTime() - midnight) / 60_000);
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, elapsedMins));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Parse "HH:MM" offset-since-midnight back to a UTC ISO string.
+ * Returns null if the format is invalid.
+ */
+function hhmmToIso(hhmm: string, midnight: number): string | null {
+  const match = hhmm.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  if (h > 23 || m > 59) return null;
+  return new Date(midnight + (h * 60 + m) * 60_000).toISOString();
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DayTimeline({
@@ -234,9 +258,14 @@ export default function DayTimeline({
   viewingDate,
   isToday,
 }: Props) {
-  const { deleteRun } = useHabitData();
+  const { deleteRun, updateRun } = useHabitData();
   const [selectedBlock, setSelectedBlock] = useState<LayoutBlock | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editStart, setEditStart] = useState('');   // "HH:MM"
+  const [editEnd,   setEditEnd]   = useState('');   // "HH:MM"
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving,    setSaving]    = useState(false);
 
   const scrollRef  = useRef<ScrollView>(null);
   const [timelineW, setTimelineW] = useState(TIMELINE_W_FALLBACK);
@@ -324,6 +353,37 @@ export default function DayTimeline({
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingDate]);
+
+  // ── Edit handlers (must come after midnight) ──────────────────────────────
+  const openEdit = useCallback((block: LayoutBlock) => {
+    setEditStart(isoToHHMM(block.run!.startTime, midnight));
+    setEditEnd(isoToHHMM(block.run!.endTime, midnight));
+    setEditError(null);
+    setEditing(true);
+  }, [midnight]);
+
+  const saveEdit = useCallback(async () => {
+    if (!selectedBlock?.run) return;
+    const newStartIso = hhmmToIso(editStart, midnight);
+    const newEndIso   = hhmmToIso(editEnd,   midnight);
+    if (!newStartIso) { setEditError('Invalid start time — use HH:MM'); return; }
+    if (!newEndIso)   { setEditError('Invalid end time — use HH:MM');   return; }
+    const newDurationMs = new Date(newEndIso).getTime() - new Date(newStartIso).getTime();
+    if (newDurationMs <= 0) { setEditError('End time must be after start time'); return; }
+    setSaving(true);
+    setEditError(null);
+    try {
+      const newRun = { startTime: newStartIso, endTime: newEndIso, durationMs: newDurationMs };
+      await updateRun(selectedBlock.runDate, selectedBlock.targetId, selectedBlock.run, newRun);
+      setEditing(false);
+      setSelectedBlock(null);
+    } catch (e) {
+      setEditError('Save failed — check console');
+      console.error('[DayTimeline] saveEdit error:', e);
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedBlock, editStart, editEnd, midnight, updateRun]);
 
   // ── Build blocks ──────────────────────────────────────────────────────────
 
@@ -487,9 +547,12 @@ export default function DayTimeline({
       visible={selectedBlock !== null}
       transparent
       animationType="fade"
-      onRequestClose={() => { setSelectedBlock(null); setConfirmingDelete(false); }}
+      onRequestClose={() => { setSelectedBlock(null); setConfirmingDelete(false); setEditing(false); }}
     >
-      <Pressable style={styles.modalBackdrop} onPress={() => { setSelectedBlock(null); setConfirmingDelete(false); }}>
+      <Pressable
+        style={styles.modalBackdrop}
+        onPress={() => { setSelectedBlock(null); setConfirmingDelete(false); setEditing(false); }}
+      >
         <Pressable style={styles.modalCard} onPress={() => {}}>
           {selectedBlock && (
             <>
@@ -497,91 +560,135 @@ export default function DayTimeline({
               <View style={[styles.modalStripe, { backgroundColor: selectedBlock.color }]} />
 
               <View style={styles.modalBody}>
-                {/* ID */}
+                {/* ID + name always visible */}
                 <Text style={styles.modalId}>{selectedBlock.targetId}</Text>
-
-                {/* Name */}
                 <Text style={styles.modalName}>{selectedBlock.label}</Text>
 
-                {/* Duration */}
-                <Text style={styles.modalDuration}>
-                  {fmtDurationHMS(selectedBlock.durationMs)}
-                </Text>
+                {editing ? (
+                  /* ── Edit mode ── */
+                  <>
+                    <Text style={styles.editLabel}>Start time (HH:MM)</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={editStart}
+                      onChangeText={setEditStart}
+                      placeholder="e.g. 08:30"
+                      autoCapitalize="none"
+                      keyboardType="numbers-and-punctuation"
+                    />
+                    <Text style={styles.editLabel}>End time (HH:MM)</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={editEnd}
+                      onChangeText={setEditEnd}
+                      placeholder="e.g. 09:15"
+                      autoCapitalize="none"
+                      keyboardType="numbers-and-punctuation"
+                    />
+                    {editError && <Text style={styles.editError}>{editError}</Text>}
 
-                {/* Meta */}
-                <View style={styles.modalMeta}>
-                  <Text style={styles.modalMetaText}>
-                    Start  {selectedBlock.timeLabel}
-                  </Text>
-                  <Text style={styles.modalMetaText}>
-                    End    {selectedBlock.endTimeLabel}
-                  </Text>
-                  <Text style={styles.modalMetaText}>
-                    Date   {selectedBlock.runDate}
-                  </Text>
-                  {selectedBlock.isLive && (
-                    <Text style={[styles.modalMetaText, { color: '#2e7d32' }]}>
-                      ▶ Running
-                    </Text>
-                  )}
-                  {selectedBlock.isGhost && (
-                    <Text style={[styles.modalMetaText, { color: '#9e9e9e' }]}>
-                      Short run (inflated for visibility)
-                    </Text>
-                  )}
-                  {selectedBlock.isCrossDay && (
-                    <Text style={[styles.modalMetaText, { color: '#1565c0' }]}>
-                      ↩ Continued from previous day
-                    </Text>
-                  )}
-                </View>
-
-                {/* Delete */}
-                {!selectedBlock.isLive && selectedBlock.run && (
-                  confirmingDelete ? (
-                    <View style={styles.confirmRow}>
-                      <Text style={styles.confirmText}>Remove this run?</Text>
-                      <View style={styles.confirmBtns}>
-                        <Pressable
-                          style={styles.confirmCancel}
-                          onPress={() => setConfirmingDelete(false)}
-                        >
-                          <Text style={styles.confirmCancelText}>Cancel</Text>
-                        </Pressable>
-                        <Pressable
-                          style={styles.confirmDelete}
-                          onPress={async () => {
-                            console.log('[DayTimeline] delete confirmed');
-                            console.log('  runDate:', selectedBlock.runDate);
-                            console.log('  targetId:', selectedBlock.targetId);
-                            console.log('  run:', JSON.stringify(selectedBlock.run));
-                            try {
-                              await deleteRun(selectedBlock.runDate, selectedBlock.targetId, selectedBlock.run!);
-                              console.log('[DayTimeline] deleteRun resolved OK');
-                              setConfirmingDelete(false);
-                              setSelectedBlock(null);
-                            } catch (e) {
-                              console.error('[DayTimeline] deleteRun threw:', e);
-                            }
-                          }}
-                        >
-                          <Text style={styles.confirmDeleteText}>Delete</Text>
-                        </Pressable>
-                      </View>
+                    <View style={styles.confirmBtns}>
+                      <Pressable
+                        style={styles.confirmCancel}
+                        onPress={() => { setEditing(false); setEditError(null); }}
+                      >
+                        <Text style={styles.confirmCancelText}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.confirmDelete, { backgroundColor: '#1565c0' }]}
+                        onPress={saveEdit}
+                        disabled={saving}
+                      >
+                        <Text style={styles.confirmDeleteText}>
+                          {saving ? 'Saving…' : 'Save'}
+                        </Text>
+                      </Pressable>
                     </View>
-                  ) : (
-                    <Pressable
-                      style={styles.deleteBtn}
-                      onPress={() => setConfirmingDelete(true)}
-                    >
-                      <Text style={styles.deleteBtnText}>Delete this run</Text>
-                    </Pressable>
-                  )
-                )}
+                  </>
+                ) : (
+                  /* ── View mode ── */
+                  <>
+                    {/* Duration */}
+                    <Text style={styles.modalDuration}>
+                      {fmtDurationHMS(selectedBlock.durationMs)}
+                    </Text>
 
-                <Pressable style={styles.closeBtn} onPress={() => setSelectedBlock(null)}>
-                  <Text style={styles.closeBtnText}>Close</Text>
-                </Pressable>
+                    {/* Meta */}
+                    <View style={styles.modalMeta}>
+                      <Text style={styles.modalMetaText}>Start  {selectedBlock.timeLabel}</Text>
+                      <Text style={styles.modalMetaText}>End    {selectedBlock.endTimeLabel}</Text>
+                      <Text style={styles.modalMetaText}>Date   {selectedBlock.runDate}</Text>
+                      {selectedBlock.isLive && (
+                        <Text style={[styles.modalMetaText, { color: '#2e7d32' }]}>▶ Running</Text>
+                      )}
+                      {selectedBlock.isGhost && (
+                        <Text style={[styles.modalMetaText, { color: '#9e9e9e' }]}>
+                          Short run (inflated for visibility)
+                        </Text>
+                      )}
+                      {selectedBlock.isCrossDay && (
+                        <Text style={[styles.modalMetaText, { color: '#1565c0' }]}>
+                          ↩ Continued from previous day
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* Edit button — completed runs only */}
+                    {!selectedBlock.isLive && selectedBlock.run && (
+                      <Pressable
+                        style={styles.editBtn}
+                        onPress={() => openEdit(selectedBlock)}
+                      >
+                        <Text style={styles.editBtnText}>Edit start / end time</Text>
+                      </Pressable>
+                    )}
+
+                    {/* Delete */}
+                    {!selectedBlock.isLive && selectedBlock.run && (
+                      confirmingDelete ? (
+                        <View style={styles.confirmRow}>
+                          <Text style={styles.confirmText}>Remove this run?</Text>
+                          <View style={styles.confirmBtns}>
+                            <Pressable
+                              style={styles.confirmCancel}
+                              onPress={() => setConfirmingDelete(false)}
+                            >
+                              <Text style={styles.confirmCancelText}>Cancel</Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.confirmDelete}
+                              onPress={async () => {
+                                try {
+                                  await deleteRun(selectedBlock.runDate, selectedBlock.targetId, selectedBlock.run!);
+                                  setConfirmingDelete(false);
+                                  setSelectedBlock(null);
+                                } catch (e) {
+                                  console.error('[DayTimeline] deleteRun threw:', e);
+                                }
+                              }}
+                            >
+                              <Text style={styles.confirmDeleteText}>Delete</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      ) : (
+                        <Pressable
+                          style={styles.deleteBtn}
+                          onPress={() => setConfirmingDelete(true)}
+                        >
+                          <Text style={styles.deleteBtnText}>Delete this run</Text>
+                        </Pressable>
+                      )
+                    )}
+
+                    <Pressable
+                      style={styles.closeBtn}
+                      onPress={() => { setSelectedBlock(null); setConfirmingDelete(false); }}
+                    >
+                      <Text style={styles.closeBtnText}>Close</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
             </>
           )}
@@ -731,6 +838,41 @@ const styles = StyleSheet.create({
   modalMetaText: {
     fontSize: 13,
     color:    '#616161',
+  },
+  editBtn: {
+    backgroundColor: '#e3f2fd',
+    borderRadius:    10,
+    paddingVertical: 12,
+    alignItems:      'center',
+    marginBottom:    10,
+  },
+  editBtnText: {
+    fontSize:   14,
+    fontWeight: '600',
+    color:      '#1565c0',
+  },
+  editLabel: {
+    fontSize:     12,
+    color:        '#616161',
+    marginBottom: 4,
+    marginTop:    12,
+  },
+  editInput: {
+    borderWidth:   1,
+    borderColor:   '#e0e0e0',
+    borderRadius:  8,
+    paddingVertical:  10,
+    paddingHorizontal: 12,
+    fontSize:      16,
+    color:         '#212121',
+    backgroundColor: '#fafafa',
+    fontVariant:   ['tabular-nums'],
+  },
+  editError: {
+    fontSize:   12,
+    color:      '#c62828',
+    marginTop:  8,
+    textAlign:  'center',
   },
   deleteBtn: {
     backgroundColor: '#ffebee',
