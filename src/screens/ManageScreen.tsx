@@ -1,12 +1,15 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   Pressable,
+  SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView, TouchableOpacity } from 'react-native-gesture-handler';
+import { useNavigation } from '@react-navigation/native';
 import { useHabitData } from '../context/HabitDataContext';
 import { signOut } from '../services/auth';
 import DayStartSetting from '../components/DayStartSetting';
@@ -26,6 +29,7 @@ function uid7() {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ManageScreen() {
+  const navigation = useNavigation();
   const {
     routines, goals,
     addRoutine, updateRoutine, deleteRoutine, reorderAll,
@@ -206,35 +210,45 @@ export default function ManageScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <DraggableFlatList
-          data={flatItems}
-          keyExtractor={(item) => item.key}
-          renderItem={renderItem}
-          onDragBegin={handleDragBegin}
-          onDragEnd={handleDragEnd}
-          activationDistance={10}
-          contentContainerStyle={styles.listContent}
-          ListFooterComponent={
-            <View style={styles.footer}>
-              <Pressable
-                style={styles.addRoutineBtn}
-                onPress={() => setRoutineModal({ visible: true, routine: null })}
-              >
-                <Text style={styles.addRoutineText}>＋ Add Routine</Text>
-              </Pressable>
+      <SafeAreaView style={styles.container}>
 
-              <DayStartSetting />
+        {/* ── Sticky header ── */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Manage</Text>
+          <Pressable style={styles.doneBtn} onPress={() => navigation.goBack()}>
+            <Text style={styles.doneBtnText}>✕ Done</Text>
+          </Pressable>
+        </View>
 
-              <Pressable
-                style={styles.signOutBtn}
-                onPress={() => signOut()}
-              >
-                <Text style={styles.signOutText}>Sign Out</Text>
-              </Pressable>
-            </View>
-          }
-        />
+        <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+          <DraggableFlatList
+            data={flatItems}
+            keyExtractor={(item) => item.key}
+            renderItem={renderItem}
+            onDragBegin={handleDragBegin}
+            onDragEnd={handleDragEnd}
+            activationDistance={10}
+            scrollEnabled={false}
+          />
+
+          <View style={styles.footer}>
+            <Pressable
+              style={styles.addRoutineBtn}
+              onPress={() => setRoutineModal({ visible: true, routine: null })}
+            >
+              <Text style={styles.addRoutineText}>＋ Add Routine</Text>
+            </Pressable>
+
+            <DayStartSetting />
+
+            <Pressable
+              style={styles.signOutBtn}
+              onPress={() => signOut()}
+            >
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
 
         <RoutineModal
           visible={routineModal.visible}
@@ -271,7 +285,7 @@ export default function ManageScreen() {
           }}
           onClose={() => setGoalModal({ visible: false })}
         />
-      </View>
+      </SafeAreaView>
     </GestureHandlerRootView>
   );
 }
@@ -281,6 +295,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  header: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'space-between',
+    paddingHorizontal: 16,
+    paddingVertical:   12,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e0e0e0',
+  },
+  headerTitle: {
+    fontSize:   18,
+    fontWeight: '700',
+    color:      '#1a1a1a',
+  },
+  doneBtn: {
+    backgroundColor: '#c62828',
+    paddingHorizontal: 16,
+    paddingVertical:    8,
+    borderRadius:      20,
+  },
+  doneBtnText: {
+    fontSize:   14,
+    fontWeight: '700',
+    color:      '#fff',
+    letterSpacing: 0.3,
+  },
+  list: {
+    flex: 1,
   },
   listContent: {
     paddingVertical: 16,
