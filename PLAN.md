@@ -1,335 +1,348 @@
-# Habit Tracker - Architecture & Data Model
+# Ritual — Architecture & Data Model
 
-This document outlines the detailed architecture, data model, and implementation strategy for the Habit Tracker application.
-
-## Table of Contents
-
-1. [Core Concepts](#core-concepts)
-2. [Data Model](#data-model)
-3. [Architecture](#architecture)
-4. [API Endpoints](#api-endpoints)
-5. [State Management](#state-management)
-6. [Implementation Strategy](#implementation-strategy)
+This document describes the actual implemented architecture, data model, and key design decisions. It is kept in sync with the codebase.
 
 ---
 
-## Core Concepts
+## Table of Contents
 
-### Routines
-- Collections of related habits (e.g., "Morning", "Misc")
-- Track overall completion for the day (all required habits completed = ✅)
-- Can have their own timers
-- Support concurrent timers across contained habits
-
-### Goals (Habits)
-- Individual tasks/habits within a routine
-- Each goal defines its own **success criteria** (e.g., "took it", "went to gym")
-- Can be **required** (must complete for routine to be complete) or **optional** (no impact on routine status)
-- Optionally track time spent
-
-### Daily Entries
-- Per-goal, per-day records
-- Independent tracking of **completion** and **time spent**
-  - You can log time without marking complete, or vice versa
-- Support for notes and modification history
-
-### Timers
-- Track time spent on goals
-- Support concurrent timers (multiple running simultaneously)
-- Tied to a specific goal on a specific date
-- Auto-save to daily entry when stopped
-
-### Completion Status
-- Each goal has a binary completion status per day
-- Completion ≠ time spent (independent)
-- Success is meeting the goal's defined success criteria
-- Changes to status are tracked with timestamps
+1. [Data Model](#data-model)
+2. [Firestore Schema](#firestore-schema)
+3. [Timer Lifecycle](#timer-lifecycle)
+4. [Timezone & Day Rollover](#timezone--day-rollover)
+5. [Timeline Rendering](#timeline-rendering)
+6. [State Management](#state-management)
+7. [Authentication](#authentication)
+8. [Key Design Decisions](#key-design-decisions)
+9. [Future Roadmap](#future-roadmap)
 
 ---
 
 ## Data Model
 
-### Firestore Structure
+### TypeScript Interfaces (`src/types/index.ts`)
 
-```
-/users/{userId}
-  /profile
-    - email: string
-    - name: string
-    - created_at: timestamp
+```typescript
+interface Routine {
+  id: string;             // UUID
+  name: string;
+  order: number;          // sort position
+  goalIds: string[];      // ordered references to Goal documents
+}
 
-  /routines/{routineId}
-    - name: string
-    - order: number (for sorting)
-    - goals: [goalId, goalId, ...] (denormalized for quick access)
-    - created_at: timestamp
-    - updated_at: timestamp
+interface Goal {
+  id: string;             // UUID
+  routineId: string;      // parent Routine
+  name: string;
+  description?: string;
+  successCriteria?: string;
+  required: boolean;      // if true, must complete for routine to count as done
+}
 
-  /goals/{goalId}
-    - routine_id: string (reference)
-    - name: string
-    - description: string (fine-grained details)
-    - success_criteria: string (what success looks like)
-    - required: boolean (required for routine completion)
-    - time_tracked: boolean (whether to track time)
-    - created_at: timestamp
-    - updated_at: timestamp
+interface Entry {
+  id: string;             // "entry-{goalId}-{date}"
+  goalId: string;
+  routineId: string;
+  date: string;           // YYYY-MM-DD (logical date in user's timezone)
+  completed: boolean | null;  // null = no response, true = done, false = failed
+  notes?: string;
+}
 
-  /entries/{entryId}
-    - goal_id: string
-    - routine_id: string
-    - user_id: string (for queries)
-    - date: string (format: "YYYY-MM-DD")
-    - completed: boolean
-    - time_spent: number (minutes)
-    - notes: string (optional)
-    - created_at: timestamp
-    - updated_at: timestamp
-    - history: [
-        {
-          timestamp: timestamp,
-          field: string (e.g., "completed", "time_spent"),
-          old_value: any,
-          new_value: any
-        }
-      ]
+interface TimingRun {
+  startTime: string;      // ISO 8601 UTC
+  endTime: string;        // ISO 8601 UTC
+  durationMs: number;
+}
 
-  /timers/{timerId}
-    - goal_id: string
-    - routine_id: string
-    - date: string (date timer was created)
-    - started_at: timestamp
-    - paused_at: timestamp (null if running)
-    - active: boolean (timer currently running)
-    - created_at: timestamp
+interface TimingSegment {
+  targetId: string;                  // Goal or Routine ID
+  targetType: 'goal' | 'routine';
+  date: string;                      // YYYY-MM-DD (logical date)
+  totalMs: number;                   // sum of all runs for this target on this date
+  segments: TimingRun[];             // individual timing runs
+}
+
+interface ActiveTimer {
+  targetId: string;
+  targetType: 'goal' | 'routine';
+  startedAt: string;      // ISO 8601 UTC
+}
+
+interface UserSettings {
+  timezone: string;        // IANA timezone (e.g. "America/Chicago")
+}
 ```
 
-### Firestore Indexes
+### Key Points
 
-```
-Collection: entries
-  Index 1: (user_id, date) → query entries for a specific day
-  Index 2: (user_id, goal_id, date) → query entries for a specific goal across dates
-
-Collection: timers
-  Index 1: (user_id, active) → query active timers
-```
+- **Completion is tri-state**: `null` (no response), `true` (done), `false` (failed). This is distinct from binary — the user explicitly marks failure vs. simply not responding.
+- **TimingRun stores absolute UTC timestamps**: all time math is in UTC. Timezone is only used to determine which logical date a moment belongs to.
+- **One TimingSegment per (target × date)**: if a user times the same habit three times on one day, all three runs accumulate in a single Firestore document via `arrayUnion` and `increment`.
 
 ---
 
-## Architecture
-
-### Frontend Structure (React Native with Expo)
+## Firestore Schema
 
 ```
-src/
-├── components/
-│   ├── TimerButton.tsx
-│   ├── GoalCard.tsx
-│   ├── RoutineCard.tsx
-│   ├── CompletionToggle.tsx
-│   └── ... (other reusable components)
+users/{uid}/
 │
-├── screens/
-│   ├── HomeScreen.tsx (today's routines/goals overview)
-│   ├── RoutineDetailScreen.tsx (view & manage a routine)
-│   ├── AnalyticsScreen.tsx (trends & insights)
-│   ├── GoalSetupScreen.tsx (create/edit goals)
-│   ├── RoutineSetupScreen.tsx (create/edit routines)
-│   └── SettingsScreen.tsx
+├── routines/{routineId}
+│     id, name, order, goalIds[]
 │
-├── services/
-│   ├── firebase.ts (Firebase config & initialization)
-│   ├── routineService.ts (CRUD for routines)
-│   ├── goalService.ts (CRUD for goals)
-│   ├── entryService.ts (CRUD for entries)
-│   ├── timerService.ts (timer logic)
-│   └── analyticsService.ts (calculations & aggregations)
+├── goals/{goalId}
+│     id, routineId, name, description?, successCriteria?, required
 │
-├── context/
-│   ├── RoutineContext.tsx (routines state)
-│   ├── GoalContext.tsx (goals state)
-│   ├── EntryContext.tsx (daily entries state)
-│   ├── TimerContext.tsx (active timers state)
-│   └── UserContext.tsx (auth & user data)
+├── entries/{entryId}
+│     id, goalId, routineId, date, completed, notes?
 │
-├── utils/
-│   ├── dateUtils.ts (date formatting, comparisons)
-│   ├── timeUtils.ts (duration formatting, conversions)
-│   ├── analyticsUtils.ts (adherence %, averages, trends)
-│   └── validation.ts
+├── dates/{YYYY-MM-DD}/timingSegments/{targetId}
+│     targetId, targetType, date, totalMs, segments[]
 │
-└── types/
-    └── index.ts (TypeScript interfaces for all data structures)
+├── activeTimers/{targetId}
+│     targetId, targetType, startedAt
+│
+└── settings/preferences
+      timezone
 ```
 
-### Key Services
+### Why This Structure
 
-#### Timer Service
-- Manages concurrent timers in memory
-- Handles start/pause/stop/resume actions
-- Saves to Firestore on stop
-- Supports offline (persists to AsyncStorage)
+| Collection | Indexed by | Reasoning |
+|------------|------------|-----------|
+| `routines` | uid | Small set, loaded once, listened globally |
+| `goals` | uid | Small set, loaded once, listened globally |
+| `entries` | uid + date | Filtered per viewing date — listener re-subscribes on date change |
+| `timingSegments` | uid + date + targetId | Nested under `/dates/{date}/` so loading a day fetches only that day's timing data. One doc per target means upsert is a known path (no query needed) |
+| `activeTimers` | uid + targetId | At most one per target. Keyed by targetId so start = `setDoc`, stop = `deleteDoc` — no query needed |
+| `settings` | uid | Single document per user |
 
-#### Entry Service
-- Create/update/delete daily entries
-- Track modification history
-- Calculate routine completion status
-- Sync with Firestore
+### Concurrent-Write Safety
 
-#### Analytics Service
-- Calculate adherence rates (% of required habits completed)
-- Calculate time averages per habit
-- Generate trend data over time ranges
-- Build timeline data for daily view
+`upsertTimingSegment` uses Firestore atomic field transforms:
 
-### State Management
+```typescript
+setDoc(segRef, {
+  totalMs:  increment(run.durationMs),   // atomic add
+  segments: arrayUnion(run),             // atomic append
+}, { merge: true });
+```
 
-Use React Context API + Custom Hooks for:
-- Current user & auth state
-- Today's routines and goals
-- Today's entries and their status
-- Active timers
-
-Offline persistence:
-- AsyncStorage for temporary data
-- Firestore offline persistence for queries
-- Manual sync when back online
+This means two devices stopping timers for the same target on the same day will both succeed without overwriting each other.
 
 ---
 
-## API Endpoints (Future)
+## Timer Lifecycle
 
-For Apple Shortcuts integration:
+### Start → Run → Stop → Store
 
-### Authentication
 ```
-POST /api/auth/token
-  - Get Firebase token for headless requests
-```
-
-### Timer Operations
-```
-POST /api/timers/start
-  { goal_id, routine_id, date }
-  → Returns timer_id
-
-POST /api/timers/{timerId}/stop
-  → Returns { goal_id, time_spent }
-
-POST /api/timers/{timerId}/pause
-  → Pauses current timer
-
-POST /api/timers/{timerId}/resume
-  → Resumes paused timer
-
-GET /api/timers/active
-  → Returns all active timers for today
-```
-
-### Entry Operations
-```
-POST /api/entries
-  { goal_id, routine_id, date, completed, time_spent, notes }
-  → Creates/updates entry
-
-PATCH /api/entries/{entryId}
-  { completed?, time_spent?, notes? }
-  → Updates existing entry
-
-GET /api/entries?date=YYYY-MM-DD
-  → Get all entries for a date
+┌──────────────────────────────────────────────────────────────────┐
+│ 1. START                                                         │
+│    startTimer(targetId, 'goal')                                  │
+│    → setDoc('activeTimers/{targetId}', { startedAt: now() })     │
+│    → onSnapshot fires → UI shows running timer                   │
+│                                                                  │
+│ 2. RUNNING                                                       │
+│    ActiveTimer doc persists in Firestore                         │
+│    TimerButton polls Date.now() every 1s for elapsed display     │
+│    Works across tabs/devices (same onSnapshot)                   │
+│                                                                  │
+│ 3. STOP                                                          │
+│    stopTimer(targetId)                                           │
+│    → deleteDoc('activeTimers/{targetId}')  ← UI clears instantly │
+│    → splitByLogicalDay(startedAt, endTime, timezone)             │
+│    → for each chunk:                                             │
+│        upsertTimingSegment(uid, chunk.date, targetId, ...)       │
+│    → onSnapshot fires → timeline blocks appear                   │
+│                                                                  │
+│ 4. DELETE (optional)                                             │
+│    deleteRun(date, targetId, run)                                │
+│    → updateDoc with arrayRemove(run) + increment(-durationMs)    │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### Routine Operations
+### Cross-Midnight Splitting
+
+When a timer runs past midnight in the user's timezone, `splitByLogicalDay` emits multiple chunks:
+
 ```
-GET /api/routines/{routineId}/status?date=YYYY-MM-DD
-  → Get routine completion status for date
-  → Returns { completed: boolean, required_goals: n, completed_goals: n }
+Timer: start 2026-03-28T22:30 CDT → stop 2026-03-29T01:15 CDT
+Timezone: America/Chicago (CDT = UTC-5)
+Midnight CDT = 2026-03-29T05:00:00Z
+
+Chunk 1: date = "2026-03-28"
+         startTime = 2026-03-29T03:30:00Z (10:30 PM CDT)
+         endTime   = 2026-03-29T05:00:00Z (midnight CDT)
+         durationMs = 5,400,000 (1h 30m)
+
+Chunk 2: date = "2026-03-29"
+         startTime = 2026-03-29T05:00:00Z (midnight CDT)
+         endTime   = 2026-03-29T06:15:00Z (1:15 AM CDT)
+         durationMs = 4,500,000 (1h 15m)
+
+Each chunk → upsertTimingSegment under its respective date path.
 ```
 
-### Analytics
-```
-GET /api/analytics/adherence?goal_id=X&days=30
-  → Returns adherence % for last N days
+### Deleting a Run
 
-GET /api/analytics/average-time?goal_id=X&days=30
-  → Returns average time spent (minutes)
-```
+`arrayRemove` requires an exact field-for-field match with the stored object. Since `splitByLogicalDay` includes a `date` field in each chunk (and that field gets stored via `arrayUnion`), the `run` object passed to `deleteTimingRun` must include `date` as well. The app obtains this directly from the Firestore document's `segments` array (which preserves all stored fields regardless of the TypeScript type).
 
 ---
 
-## Implementation Strategy
+## Timezone & Day Rollover
 
-### Phase 1: Core Data & Offline (Weeks 1-2)
+### Core Principle
 
-- [x] Firestore structure & security rules
-- [ ] User authentication (Firebase Auth)
-- [ ] Routine CRUD (create, read, update, delete)
-- [ ] Goal CRUD
-- [ ] Daily Entry CRUD with history tracking
-- [ ] Offline persistence setup
-- [ ] Sync/conflict resolution logic
+All times are stored as UTC ISO strings. The user's IANA timezone determines only one thing: **which YYYY-MM-DD date a given UTC moment belongs to**.
 
-### Phase 2: UI & Timer (Weeks 3-4)
+### Implementation (`src/utils/date.ts`)
 
-- [ ] Home screen (today's overview)
-- [ ] Routine detail screen
-- [ ] Timer UI & logic
-- [ ] Entry creation/editing UI
-- [ ] Completion toggle UI
+**`getLogicalDate(timezone, at)`** — returns the YYYY-MM-DD for a moment in a timezone.
 
-### Phase 3: Analytics (Week 5)
+Uses `Intl.DateTimeFormat('sv', { timeZone })` — the Swedish locale natively outputs `YYYY-MM-DD`.
 
-- [ ] Analytics service (adherence, averages, trends)
-- [ ] Analytics screen
-- [ ] Daily timeline visualization
+**`nextMidnightInTZ(timezone, after)`** — returns the exact UTC millisecond of the next midnight.
 
-### Phase 4: Setup & Settings (Week 5-6)
+Uses binary search over a ±14-hour window around UTC midnight (covers every real-world UTC offset, including DST transitions). The search converges to within 1 second.
 
-- [ ] Goal setup flow
-- [ ] Routine setup flow
-- [ ] Settings screen
-- [ ] Edit/delete flows
+**`splitByLogicalDay(startTime, endTime, timezone)`** — walks from start to end, emitting one chunk per logical day boundary.
 
-### Phase 5: API & Integration (Week 6-7)
+### Why Binary Search
 
-- [ ] Cloud Functions for API endpoints
-- [ ] Apple Shortcuts examples
-- [ ] Testing & refinement
+DST transitions shift midnight by ±1 hour. Rather than maintaining a timezone rules database, the binary search asks `Intl.DateTimeFormat` directly: "what date is it at this UTC millisecond in this timezone?" This is provably correct for any IANA timezone, including historical and future DST changes.
 
-### Phase 6: Polish & Deploy (Week 7+)
+---
 
-- [ ] Testing across web/mobile
-- [ ] Performance optimization
-- [ ] Deploy to Firebase hosting (web) & app stores
+## Timeline Rendering
+
+### DayTimeline Component (`src/components/DayTimeline.tsx`)
+
+The timeline is a scrollable 24-hour view (0000–2359) that renders timing segments as positioned blocks.
+
+### Positioning Algorithm
+
+```
+1. Compute midnightUTC = UTC millisecond of 00:00:00 on viewingDate in timezone
+   (same binary search technique as nextMidnightInTZ)
+
+2. For each TimingRun:
+   topY     = (run.startUTC − midnightUTC) / 60,000 × (hourHeight / 60)
+   heightPx = max(minBlockH, run.durationMs / 3,600,000 × hourHeight)
+
+3. Overlap detection: greedy column assignment
+   - Sort blocks by topY
+   - For each block, find the leftmost column where it doesn't overlap
+   - Divide available width among occupied columns
+```
+
+### Pinch-to-Zoom
+
+`hourHeight` ranges from 16px (entire day fits on screen) to 720px (minute-level detail).
+
+- **Native**: `Gesture.Pinch()` from react-native-gesture-handler + Reanimated shared values
+- **Web**: `Ctrl/Cmd + scroll wheel` listener (also catches trackpad pinch)
+
+Focal-point anchoring: the time under the pinch center stays fixed during zoom by adjusting the scroll position.
+
+### Adaptive Grid
+
+| hourHeight | Tick interval | Label interval |
+|------------|--------------|----------------|
+| ≥ 720 px/hr | 1 min | 10 min |
+| ≥ 480 px/hr | 5 min | 15 min |
+| ≥ 200 px/hr | 5 min | 30 min |
+| ≥ 100 px/hr | 15 min | 30 min |
+| ≥ 48 px/hr | 15 min | 1 hr |
+| ≥ 24 px/hr | 30 min | 2 hr |
+| < 24 px/hr | 60 min | 4 hr |
+
+### Ghost Blocks
+
+Runs shorter than the minimum block height (which scales with zoom) are inflated to stay visible. These "ghost" blocks render at reduced opacity (0.35) to signal that their visual size exceeds their actual duration.
+
+### Block Details Modal
+
+Tapping a completed block opens a modal showing: target name, ID, duration (HH:MM:SS), start/end times, and a delete button with inline confirmation.
+
+---
+
+## State Management
+
+### HabitDataContext (`src/context/HabitDataContext.tsx`)
+
+A single React Context holds all app state and mutations:
+
+```
+HabitDataCtx
+├── Auth: uid, loading
+├── Settings: settings (timezone), logicalToday, viewingDate
+├── Collections (all from onSnapshot):
+│   ├── routines: Routine[]
+│   ├── goals: Goal[]
+│   ├── entries: Entry[]          ← re-subscribes when viewingDate changes
+│   ├── timingSegments: TimingSegment[]  ← re-subscribes when viewingDate changes
+│   └── activeTimers: ActiveTimer[]
+└── Mutations:
+    ├── Routines: add, update, delete, reorderAll
+    ├── Goals: add, update, delete, moveGoal
+    ├── Entries: setGoalStatus
+    ├── Settings: updateSettings
+    └── Timers: startTimer, stopTimer, deleteRun
+```
+
+### Real-Time Sync
+
+Every collection uses Firestore `onSnapshot`. When any device writes, all connected devices update within ~1 second. There is no local cache or Redux — Firestore is the single source of truth.
+
+### Listener Lifecycle
+
+- **Global listeners** (routines, goals, activeTimers, settings): subscribe once when `uid` is set, unsubscribe on sign-out.
+- **Date-scoped listeners** (entries, timingSegments): re-subscribe whenever `viewingDate` changes, so only the viewed day's data is loaded.
+
+---
+
+## Authentication
+
+### Supported Methods
+
+| Method | Platform | Implementation |
+|--------|----------|----------------|
+| Google Sign-In | iOS/Android | `expo-auth-session` → `signInWithCredential` |
+| Google Sign-In | Web | `signInWithPopup` (Firebase popup flow) |
+| Phone (SMS) | iOS/Android | `expo-firebase-recaptcha` + `PhoneAuthProvider.verifyPhoneNumber` |
+
+### Auth Flow
+
+1. `App.tsx` subscribes to `onAuthStateChanged`
+2. No user → show `LoginScreen`
+3. User signs in → wrap app in `HabitDataProvider` → Firestore listeners start
+4. Firestore security rules: `allow read, write: if request.auth != null && request.auth.uid == uid`
 
 ---
 
 ## Key Design Decisions
 
-1. **Independent Time & Completion**: Allows flexible logging (time without completion, or vice versa)
+1. **Firestore as single source of truth** — no local Redux/state cache. All reads come from `onSnapshot`, all writes go to Firestore. This eliminates sync conflicts at the cost of requiring connectivity for writes.
 
-2. **Denormalized Goals in Routines**: Fetch goals without extra query; trade off storage efficiency for read speed
+2. **One TimingSegment doc per (target × date)** — keyed by targetId so upsert is a `setDoc` to a known path, not a query. Uses `arrayUnion` + `increment` for concurrent-write safety.
 
-3. **Flat Entry Structure**: Easier to query entries by date or goal; avoids deep nesting
+3. **Date-scoped subcollections** (`dates/{YYYY-MM-DD}/timingSegments/`) — loading a day's timing data is one collection read with no filtering. Want to purge old data? Delete the date node.
 
-4. **History Array in Entries**: Audit trail without subcollections; simpler reads
+4. **Binary search for midnight** — avoids timezone rule databases. Works for any IANA timezone including DST edges. Provably correct.
 
-5. **Concurrent Timers**: Support multi-tasking workflows naturally
+5. **Tri-state completion** — `null` / `true` / `false` distinguishes "hasn't responded yet" from "explicitly failed." This matters for tracking adherence honestly.
 
-6. **Offline-First with Cloud Sync**: Firestore offline persistence + manual sync handles network interruptions
+6. **Denormalized goalIds in Routine** — avoids a second query to get the ordered list of goals for a routine. Trade-off: must update the array when goals are added/removed/reordered.
 
-7. **Required vs. Optional**: Simple boolean allows gradual habit building without breaking routines
+7. **Split-on-midnight for timers** — overnight sessions are split into per-day chunks at the timezone boundary. Each chunk is stored under its logical date. This keeps per-day queries correct without post-processing.
 
-8. **Custom Success Criteria**: Flexible per-habit definitions eliminate one-size-fits-all constraints
+8. **Pinch-to-zoom with focal anchoring** — the timeline scales from day overview to minute detail. The point under your fingers stays fixed. Web uses Ctrl+wheel (standard pattern: Google Maps, Figma).
 
 ---
 
-## Notes
+## Future Roadmap
 
-- Use TypeScript throughout for type safety
-- Implement proper Firebase security rules (user data isolation)
-- Plan for data export/backup
-- Consider privacy: all data stored in user's Firebase project
-- Future: Consider data aggregation for trends (weekly, monthly summaries)
+- **Apple Shortcuts API** — Cloud Functions exposing start/stop timer, log completion, fetch stats. Enables "Hey Siri, start my morning routine" automation.
+- **Analytics dashboard** — adherence rates, time averages, streak tracking, trend charts.
+- **Push notifications** — reminders for routines at user-defined times.
+- **Data export** — CSV/JSON export of entries and timing data.
