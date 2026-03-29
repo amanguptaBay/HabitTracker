@@ -149,6 +149,7 @@ interface Block {
   durationMs: number;
   timeLabel:  string;
   isLive:     boolean;
+  isGhost:    boolean;   // true when block was inflated to minimum height
 }
 
 interface LayoutBlock extends Block {
@@ -314,29 +315,37 @@ export default function DayTimeline({
   const minBlockH = Math.max(4, hourH / 16); // min block height scales with zoom
 
   const completedBlocks: Block[] = timingSegments.flatMap((seg) =>
-    (seg.segments ?? []).map((run, i) => ({
-      id:         `${seg.targetId}-${i}`,
-      label:      labelFor(seg.targetId),
-      color:      blockColor(seg.targetId),
-      topY:       isoToY(run.startTime, midnight, hourH),
-      heightPx:   Math.max(minBlockH, (run.durationMs / 3_600_000) * hourH),
-      durationMs: run.durationMs,
-      timeLabel:  fmtLocalTime(run.startTime, midnight, timezone),
-      isLive:     false,
-    }))
+    (seg.segments ?? []).map((run, i) => {
+      const naturalH = (run.durationMs / 3_600_000) * hourH;
+      const heightPx = Math.max(minBlockH, naturalH);
+      return {
+        id:         `${seg.targetId}-${i}`,
+        label:      labelFor(seg.targetId),
+        color:      blockColor(seg.targetId),
+        topY:       isoToY(run.startTime, midnight, hourH),
+        heightPx,
+        durationMs: run.durationMs,
+        timeLabel:  fmtLocalTime(run.startTime, midnight, timezone),
+        isLive:     false,
+        isGhost:    naturalH < minBlockH,
+      };
+    })
   );
 
   const liveBlocks: Block[] = activeTimers.map((t) => {
     const durationMs = nowMs - new Date(t.startedAt).getTime();
+    const naturalH   = (durationMs / 3_600_000) * hourH;
+    const heightPx   = Math.max(minBlockH, naturalH);
     return {
       id:         `live-${t.targetId}`,
       label:      labelFor(t.targetId),
       color:      blockColor(t.targetId),
       topY:       isoToY(t.startedAt, midnight, hourH),
-      heightPx:   Math.max(minBlockH, (durationMs / 3_600_000) * hourH),
+      heightPx,
       durationMs,
       timeLabel:  fmtLocalTime(t.startedAt, midnight, timezone),
       isLive:     true,
+      isGhost:    naturalH < minBlockH,
     };
   });
 
@@ -407,8 +416,10 @@ export default function DayTimeline({
                   left:            blockLeft,
                   right:           blockRight,
                   backgroundColor: block.color,
+                  opacity:         block.isGhost ? 0.35 : 1,
                 },
                 block.isLive && styles.blockLive,
+                block.isGhost && styles.blockGhost,
               ]}
             >
               <Text style={styles.blockName} numberOfLines={1}>
@@ -508,6 +519,11 @@ const styles = StyleSheet.create({
   blockLive: {
     borderWidth: 1.5,
     borderColor: 'rgba(0,0,0,0.15)',
+  },
+  blockGhost: {
+    borderWidth:  1,
+    borderStyle:  'dashed',
+    borderColor:  'rgba(0,0,0,0.25)',
   },
   blockName: {
     fontSize:   12,
