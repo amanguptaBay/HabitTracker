@@ -10,6 +10,7 @@ import { subscribeToAuth } from './src/services/auth';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ManageScreen from './src/screens/ManageScreen';
+import CalendarScreen from './src/screens/CalendarScreen';
 import { RootStackParamList } from './src/navigation/types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -60,6 +61,11 @@ export default function App() {
             name="Manage"
             component={ManageScreen}
             options={{ title: 'Manage Routines', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="Calendar"
+            component={CalendarScreen}
+            options={{ title: 'Time Log', headerBackTitle: 'Back', headerStyle: { backgroundColor: '#0f0f0f' }, headerTintColor: '#fff' }}
           />
         </Stack.Navigator>
       </NavigationContainer>

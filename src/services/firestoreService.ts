@@ -12,6 +12,8 @@
 import {
   collection,
   doc,
+  getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -127,6 +129,30 @@ export const upsertEntry = (uid: string, entry: Entry) =>
   setDoc(ref(uid, 'entries', entry.id), strip(entry), { merge: true });
 
 // ─── Timing segments ─────────────────────────────────────────────────────────
+
+/**
+ * One-time fetch of every timing-segment doc for a given calendar month.
+ * Fans out one getDocs per date in parallel — no index needed.
+ */
+export async function fetchMonthTimingSegments(
+  uid: string,
+  year: number,
+  month: number, // 1-based
+): Promise<TimingSegment[]> {
+  const daysInMonth = new Date(year, month, 0).getDate(); // month is 1-based, day 0 = last day
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dates = Array.from({ length: daysInMonth }, (_, i) =>
+    `${year}-${pad(month)}-${pad(i + 1)}`
+  );
+  const snaps = await Promise.all(
+    dates.map((date) =>
+      getDocs(collection(db, 'users', uid, 'dates', date, 'timingSegments'))
+    )
+  );
+  return snaps.flatMap((snap) =>
+    snap.docs.map((d) => ({ ...(d.data() as TimingSegment), targetId: d.id }))
+  );
+}
 
 /**
  * Upsert a timing run into the per-(target × date) document.

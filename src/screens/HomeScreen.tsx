@@ -103,14 +103,19 @@ export default function HomeScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
 
-      {/* ── Top bar: date label + Manage ──────────────────────────────────── */}
+      {/* ── Top bar: date label + action buttons ──────────────────────────── */}
       <View style={styles.topBar}>
         <Text style={[styles.dateLabel, !isToday && styles.dateLabelPast]}>
           {formatViewingDate(viewingDate, isToday)}
         </Text>
-        <Pressable onPress={() => navigation.navigate('Manage')} hitSlop={8}>
-          <Text style={styles.manageBtn}>Manage</Text>
-        </Pressable>
+        <View style={styles.topActions}>
+          <Pressable onPress={() => navigation.navigate('Calendar')} hitSlop={8} style={styles.topActionBtn}>
+            <Text style={styles.topActionIcon}>📊</Text>
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate('Manage')} hitSlop={8}>
+            <Text style={styles.manageBtn}>Manage</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* ── Date navigation row ───────────────────────────────────────────── */}
@@ -247,6 +252,17 @@ const styles = StyleSheet.create({
   },
   dateLabelPast: {
     color: '#888',
+  },
+  topActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  topActionBtn: {
+    padding: 2,
+  },
+  topActionIcon: {
+    fontSize: 20,
   },
   manageBtn: {
     fontSize: 15,
