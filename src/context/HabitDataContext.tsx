@@ -16,7 +16,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { Goal, Routine, Entry, TimingSegment, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types';
+import { Goal, Routine, Entry, TimingSegment, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types'; // TimingSegment used in state type
 import { subscribeToAuth } from '../services/auth';
 import {
   listenRoutines,
@@ -35,8 +35,7 @@ import {
   removeGoal,
   updateGoalOrder,
   upsertEntry,
-  saveTimingSegment,
-  mergeTimingSegments,
+  upsertTimingSegment,
 } from '../services/firestoreService';
 import { getLogicalDate, splitByLogicalDay } from '../utils/date';
 
@@ -95,12 +94,6 @@ export function useHabitData(): HabitDataCtx {
 
 const nowIso = () => new Date().toISOString();
 
-function uid7() {
-  return Math.random().toString(36).slice(2, 9);
-}
-
-const MERGE_GAP_MS = 60_000; // merge segments with < 1 min gap
-
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export function HabitDataProvider({ children }: { children: React.ReactNode }) {
@@ -113,10 +106,8 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   const [timingSegments, setTimingSegments] = useState<TimingSegment[]>([]);
   const [activeTimers, setActiveTimers]     = useState<ActiveTimer[]>([]);
 
-  // Keep refs so callbacks always see current values without stale closures
-  const segmentsRef = useRef<TimingSegment[]>([]);
+  // Keep ref so callbacks always see current settings without stale closures
   const settingsRef = useRef<UserSettings>(DEFAULT_SETTINGS);
-  segmentsRef.current = timingSegments;
   settingsRef.current = settings;
 
   // Derived: logical date string for today in the user's timezone
@@ -303,44 +294,16 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     const timer = activeTimers.find((t) => t.targetId === targetId);
     if (!timer) return;
 
-    const endTime   = nowIso();
-    const startTime = timer.startedAt;
+    const endTime = nowIso();
     const { timezone } = settingsRef.current;
 
-    // Delete from Firestore first — onSnapshot clears it from UI
+    // Delete from Firestore first — onSnapshot clears it from UI immediately
     await stopActiveTimer(uid, targetId);
 
-    // Split the run into per-logical-day chunks (usually just one)
-    const chunks = splitByLogicalDay(startTime, endTime, timezone);
-
+    // Split across midnight boundaries (usually just one chunk)
+    const chunks = splitByLogicalDay(timer.startedAt, endTime, timezone);
     for (const chunk of chunks) {
-      // For each chunk, check if we can merge with the last segment on that date
-      const last = segmentsRef.current
-        .filter((s) => s.targetId === targetId && s.date === chunk.date)
-        .sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime())[0];
-
-      const gapMs = last
-        ? new Date(chunk.startTime).getTime() - new Date(last.endTime).getTime()
-        : Infinity;
-
-      if (last && gapMs < MERGE_GAP_MS) {
-        const merged: TimingSegment = {
-          ...last,
-          endTime:    chunk.endTime,
-          durationMs: last.durationMs + gapMs + chunk.durationMs,
-        };
-        await mergeTimingSegments(uid, merged, last.id);
-      } else {
-        await saveTimingSegment(uid, {
-          id:         `seg-${uid7()}`,
-          targetId,
-          targetType: timer.targetType,
-          date:       chunk.date,
-          startTime:  chunk.startTime,
-          endTime:    chunk.endTime,
-          durationMs: chunk.durationMs,
-        });
-      }
+      await upsertTimingSegment(uid, chunk.date, targetId, timer.targetType, chunk);
     }
   }, [uid, activeTimers]);
 

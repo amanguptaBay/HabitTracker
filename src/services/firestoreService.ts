@@ -5,8 +5,8 @@
  *   routines/{routineId}
  *   goals/{goalId}
  *   entries/{entryId}
- *   timingSegments/{segmentId}
- *   activeTimers/{targetId}   ← document ID IS the targetId (one per target)
+ *   dates/{date}/timingSegments/{targetId}  ← one doc per target per day; accumulates runs
+ *   activeTimers/{targetId}                 ← document ID IS the targetId (one per target)
  */
 
 import {
@@ -17,14 +17,15 @@ import {
   deleteDoc,
   onSnapshot,
   writeBatch,
-  serverTimestamp,
+  arrayUnion,
+  increment,
   query,
   where,
   Unsubscribe,
   DocumentData,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Goal, Routine, Entry, TimingSegment, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types';
+import { Goal, Routine, Entry, TimingSegment, TimingRun, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types';
 
 // ─── Collection helpers ──────────────────────────────────────────────────────
 
@@ -64,9 +65,10 @@ export function listenTimingSegments(
   date: string,
   cb: (data: TimingSegment[]) => void
 ): Unsubscribe {
-  const q = query(col(uid, 'timingSegments'), where('date', '==', date));
-  return onSnapshot(q, (snap) =>
-    cb(snap.docs.map((d) => ({ ...(d.data() as TimingSegment), id: d.id })))
+  // Path: users/{uid}/dates/{date}/timingSegments — one doc per targetId
+  const segCol = collection(db, 'users', uid, 'dates', date, 'timingSegments');
+  return onSnapshot(segCol, (snap) =>
+    cb(snap.docs.map((d) => ({ ...(d.data() as TimingSegment), targetId: d.id })))
   );
 }
 
@@ -126,18 +128,26 @@ export const upsertEntry = (uid: string, entry: Entry) =>
 
 // ─── Timing segments ─────────────────────────────────────────────────────────
 
-export const saveTimingSegment = (uid: string, segment: TimingSegment) =>
-  setDoc(ref(uid, 'timingSegments', segment.id), strip(segment));
-
-export const mergeTimingSegments = async (
+/**
+ * Upsert a timing run into the per-(target × date) document.
+ * Uses increment + arrayUnion so concurrent writes accumulate safely.
+ * Path: users/{uid}/dates/{date}/timingSegments/{targetId}
+ */
+export const upsertTimingSegment = (
   uid: string,
-  keep: TimingSegment,   // merged result
-  drop: string           // id of segment to delete
+  date: string,
+  targetId: string,
+  targetType: 'goal' | 'routine',
+  run: TimingRun,
 ) => {
-  const batch = writeBatch(db);
-  batch.set(ref(uid, 'timingSegments', keep.id), strip(keep));
-  batch.delete(ref(uid, 'timingSegments', drop));
-  await batch.commit();
+  const segRef = doc(db, 'users', uid, 'dates', date, 'timingSegments', targetId);
+  return setDoc(segRef, {
+    targetId,
+    targetType,
+    date,
+    totalMs:  increment(run.durationMs),
+    segments: arrayUnion(run),
+  }, { merge: true });
 };
 
 // ─── User settings ───────────────────────────────────────────────────────────

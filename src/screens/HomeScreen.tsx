@@ -65,9 +65,7 @@ export default function HomeScreen() {
     activeTimers.find((t) => t.targetId === goalId && t.targetType === 'goal') ?? null;
 
   const getGoalSegmentMs = (goalId: string) =>
-    timingSegments
-      .filter((s) => s.targetId === goalId && s.targetType === 'goal' && s.date === viewingDate)
-      .reduce((sum, s) => sum + s.durationMs, 0);
+    timingSegments.find((s) => s.targetId === goalId && s.targetType === 'goal')?.totalMs ?? 0;
 
   const handleGoalTimerToggle = (goalId: string) => {
     getActiveGoalTimer(goalId) ? stopTimer(goalId) : startTimer(goalId, 'goal');
@@ -78,9 +76,7 @@ export default function HomeScreen() {
     activeTimers.find((t) => t.targetId === routineId && t.targetType === 'routine') ?? null;
 
   const getRoutineSegmentMs = (routineId: string) =>
-    timingSegments
-      .filter((s) => s.targetId === routineId && s.targetType === 'routine' && s.date === viewingDate)
-      .reduce((sum, s) => sum + s.durationMs, 0);
+    timingSegments.find((s) => s.targetId === routineId && s.targetType === 'routine')?.totalMs ?? 0;
 
   const handleRoutineTimerToggle = (routineId: string) => {
     getActiveRoutineTimer(routineId) ? stopTimer(routineId) : startTimer(routineId, 'routine');
