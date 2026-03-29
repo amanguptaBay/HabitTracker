@@ -16,9 +16,13 @@ import { Goal, Routine } from '../types';
 import { getLogicalDate } from '../utils/date';
 import GoalCard from '../components/GoalCard';
 import RoutineCard from '../components/RoutineCard';
+import DayTimeline from '../components/DayTimeline';
 import { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type ViewMode = 'routines' | 'timeline';
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Parse a YYYY-MM-DD string into a local-midnight Date for the picker. */
 function dateFromString(s: string): Date {
@@ -40,6 +44,8 @@ function shiftDate(s: string, days: number, timezone: string): string {
   return getLogicalDate(timezone, d);
 }
 
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const {
@@ -49,9 +55,9 @@ export default function HomeScreen() {
   } = useHabitData();
 
   const [showPicker, setShowPicker] = useState(false);
+  const [viewMode, setViewMode]     = useState<ViewMode>('routines');
 
-  const isToday  = viewingDate === logicalToday;
-  const isPast   = viewingDate < logicalToday;
+  const isToday = viewingDate === logicalToday;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const getGoalsForRoutine = (routine: Routine): Goal[] =>
@@ -92,6 +98,7 @@ export default function HomeScreen() {
     return 'pending';
   };
 
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -100,10 +107,10 @@ export default function HomeScreen() {
     );
   }
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-
-      {/* ── Top bar: date label + action buttons ──────────────────────────── */}
+  // ── Chrome (always visible) ────────────────────────────────────────────────
+  const chrome = (
+    <View style={styles.chrome}>
+      {/* Top bar */}
       <View style={styles.topBar}>
         <Text style={[styles.dateLabel, !isToday && styles.dateLabelPast]}>
           {formatViewingDate(viewingDate, isToday)}
@@ -118,9 +125,8 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* ── Date navigation row ───────────────────────────────────────────── */}
+      {/* Date navigation row */}
       <View style={styles.navRow}>
-        {/* Prev */}
         <Pressable
           style={styles.navArrow}
           onPress={() => setViewingDate(shiftDate(viewingDate, -1, settings.timezone))}
@@ -129,15 +135,13 @@ export default function HomeScreen() {
           <Text style={styles.navArrowText}>‹</Text>
         </Pressable>
 
-        {/* Calendar picker button */}
         <Pressable style={styles.calBtn} onPress={() => setShowPicker(true)}>
           <Text style={styles.calIcon}>📅</Text>
-          {isToday && (
+          {isToday ? (
             <View style={styles.todayPill}>
               <Text style={styles.todayPillText}>Today</Text>
             </View>
-          )}
-          {!isToday && (
+          ) : (
             <Pressable
               style={[styles.todayPill, styles.todayPillNav]}
               onPress={() => setViewingDate(logicalToday)}
@@ -148,7 +152,6 @@ export default function HomeScreen() {
           )}
         </Pressable>
 
-        {/* Next */}
         <Pressable
           style={styles.navArrow}
           onPress={() => setViewingDate(shiftDate(viewingDate, 1, settings.timezone))}
@@ -158,7 +161,7 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      {/* ── Date picker (iOS/Android modal, web inline) ───────────────────── */}
+      {/* Date picker */}
       {showPicker && (
         <DateTimePicker
           value={dateFromString(viewingDate)}
@@ -166,15 +169,10 @@ export default function HomeScreen() {
           display={Platform.OS === 'ios' ? 'inline' : 'default'}
           onChange={(_, selected) => {
             if (Platform.OS !== 'ios') setShowPicker(false);
-            if (selected) {
-              setViewingDate(getLogicalDate(settings.timezone, selected));
-            }
+            if (selected) setViewingDate(getLogicalDate(settings.timezone, selected));
           }}
           onTouchCancel={() => setShowPicker(false)}
-          // Close iOS picker when user taps outside by tracking Done
-          {...(Platform.OS === 'ios' ? {
-            style: styles.iosPicker,
-          } : {})}
+          {...(Platform.OS === 'ios' ? { style: styles.iosPicker } : {})}
         />
       )}
       {showPicker && Platform.OS === 'ios' && (
@@ -183,59 +181,109 @@ export default function HomeScreen() {
         </Pressable>
       )}
 
-      {/* ── Routines ──────────────────────────────────────────────────────── */}
-      {routines.map((routine) => {
-        const routineGoals = getGoalsForRoutine(routine);
-        const status = getRoutineStatus(routine);
-        return (
-          <RoutineCard
-            key={routine.id}
-            routine={routine}
-            status={status}
-            isTimerRunning={!!getActiveRoutineTimer(routine.id)}
-            timerStartedAt={getActiveRoutineTimer(routine.id)?.startedAt ?? null}
-            totalTimerMs={getRoutineSegmentMs(routine.id)}
-            onTimerToggle={() => handleRoutineTimerToggle(routine.id)}
-          >
-            {routineGoals.map((goal) => {
-              const entry = getEntry(goal.id);
-              return (
-                <GoalCard
-                  key={goal.id}
-                  goal={goal}
-                  completed={entry?.completed ?? null}
-                  onDone={() => setGoalStatus(goal.id, goal.routineId, viewingDate, true)}
-                  onFail={() => setGoalStatus(goal.id, goal.routineId, viewingDate, false)}
-                  onClear={() => setGoalStatus(goal.id, goal.routineId, viewingDate, null)}
-                  isTimerRunning={!!getActiveGoalTimer(goal.id)}
-                  timerStartedAt={getActiveGoalTimer(goal.id)?.startedAt ?? null}
-                  totalTimerMs={getGoalSegmentMs(goal.id)}
-                  onTimerToggle={() => handleGoalTimerToggle(goal.id)}
-                />
-              );
-            })}
-          </RoutineCard>
-        );
-      })}
-    </ScrollView>
+      {/* View toggle */}
+      <View style={styles.toggle}>
+        <Pressable
+          style={[styles.toggleBtn, viewMode === 'routines' && styles.toggleBtnActive]}
+          onPress={() => setViewMode('routines')}
+        >
+          <Text style={[styles.toggleText, viewMode === 'routines' && styles.toggleTextActive]}>
+            Routines
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.toggleBtn, viewMode === 'timeline' && styles.toggleBtnActive]}
+          onPress={() => setViewMode('timeline')}
+        >
+          <Text style={[styles.toggleText, viewMode === 'timeline' && styles.toggleTextActive]}>
+            Timeline
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  // ── Timeline view ──────────────────────────────────────────────────────────
+  if (viewMode === 'timeline') {
+    return (
+      <View style={styles.root}>
+        {chrome}
+        <DayTimeline
+          timingSegments={timingSegments}
+          activeTimers={activeTimers}
+          goals={goals}
+          routines={routines}
+          timezone={settings.timezone}
+          isToday={isToday}
+        />
+      </View>
+    );
+  }
+
+  // ── Routines list view ─────────────────────────────────────────────────────
+  return (
+    <View style={styles.root}>
+      {chrome}
+      <ScrollView style={styles.listScroll} contentContainerStyle={styles.listContent}>
+        {routines.map((routine) => {
+          const routineGoals = getGoalsForRoutine(routine);
+          const status = getRoutineStatus(routine);
+          return (
+            <RoutineCard
+              key={routine.id}
+              routine={routine}
+              status={status}
+              isTimerRunning={!!getActiveRoutineTimer(routine.id)}
+              timerStartedAt={getActiveRoutineTimer(routine.id)?.startedAt ?? null}
+              totalTimerMs={getRoutineSegmentMs(routine.id)}
+              onTimerToggle={() => handleRoutineTimerToggle(routine.id)}
+            >
+              {routineGoals.map((goal) => {
+                const entry = getEntry(goal.id);
+                return (
+                  <GoalCard
+                    key={goal.id}
+                    goal={goal}
+                    completed={entry?.completed ?? null}
+                    onDone={() => setGoalStatus(goal.id, goal.routineId, viewingDate, true)}
+                    onFail={() => setGoalStatus(goal.id, goal.routineId, viewingDate, false)}
+                    onClear={() => setGoalStatus(goal.id, goal.routineId, viewingDate, null)}
+                    isTimerRunning={!!getActiveGoalTimer(goal.id)}
+                    timerStartedAt={getActiveGoalTimer(goal.id)?.startedAt ?? null}
+                    totalTimerMs={getGoalSegmentMs(goal.id)}
+                    onTimerToggle={() => handleGoalTimerToggle(goal.id)}
+                  />
+                );
+              })}
+            </RoutineCard>
+          );
+        })}
+      </ScrollView>
+    </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  content: {
-    padding: 16,
-    gap: 12,
-    paddingTop: 60,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
+  },
+
+  // Chrome wrapper (non-scrolling header area)
+  chrome: {
+    backgroundColor: '#f5f5f5',
+    paddingTop: 56,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    gap: 10,
   },
 
   // Top bar
@@ -339,5 +387,45 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+  },
+
+  // View toggle (segmented control)
+  toggle: {
+    flexDirection: 'row',
+    backgroundColor: '#e0e0e0',
+    borderRadius: 10,
+    padding: 3,
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  toggleBtnActive: {
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  toggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#888',
+  },
+  toggleTextActive: {
+    color: '#1a1a1a',
+  },
+
+  // List view
+  listScroll: {
+    flex: 1,
+  },
+  listContent: {
+    padding: 16,
+    gap: 12,
+    paddingBottom: 40,
   },
 });
