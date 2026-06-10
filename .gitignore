@@ -38,3 +38,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Cloud Functions build output
+functions/lib/
