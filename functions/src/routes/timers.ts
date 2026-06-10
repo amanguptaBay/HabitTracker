@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { AuthRequest } from '../auth';
 import { splitByLogicalDay } from '../date';
 
@@ -73,8 +74,8 @@ router.delete('/:targetId', async (req, res) => {
       targetId,
       targetType: timer.targetType,
       date: chunk.date,
-      totalMs:  admin.firestore.FieldValue.increment(chunk.durationMs),
-      segments: admin.firestore.FieldValue.arrayUnion({
+      totalMs:  FieldValue.increment(chunk.durationMs),
+      segments: FieldValue.arrayUnion({
         startTime:  chunk.startTime,
         endTime:    chunk.endTime,
         durationMs: chunk.durationMs,
