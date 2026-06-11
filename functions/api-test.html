@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HabitTracker API Tester</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #0f1117;
+    --surface: #1a1d27;
+    --border:  #2a2d3a;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+    --get:     #3b82f6;
+    --post:    #22c55e;
+    --put:     #f59e0b;
+    --delete:  #ef4444;
+    --radius:  8px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 24px 16px 64px;
+  }
+
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  h2 { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+       color: var(--muted); margin: 28px 0 10px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+  .wrap { max-width: 780px; margin: 0 auto; }
+
+  /* ── Config bar ─────────────────────────────────────── */
+  .config {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .config-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .config label { font-size: 12px; color: var(--muted); white-space: nowrap; min-width: 70px; }
+  .config input, .config select {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    padding: 7px 10px;
+    outline: none;
+    min-width: 0;
+  }
+  .config input:focus, .config select:focus { border-color: var(--get); }
+
+  /* ── Buttons ────────────────────────────────────────── */
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 14px;
+    transition: opacity .15s;
+    white-space: nowrap;
+  }
+  button:active { opacity: .75; }
+
+  .btn-primary   { background: var(--get); color: #fff; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-run       { background: #1e293b; border: 1px solid var(--border); color: var(--text);
+                   padding: 5px 12px; font-size: 12px; }
+  .btn-run:hover { border-color: var(--get); color: var(--get); }
+  .btn-copy      { background: transparent; border: 1px solid var(--border);
+                   color: var(--muted); font-size: 11px; padding: 3px 8px; }
+
+  /* ── Endpoint cards ─────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .card-header:hover { background: rgba(255,255,255,.02); }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    width: 54px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .GET    { background: rgba(59,130,246,.15);  color: var(--get);    }
+  .POST   { background: rgba(34,197,94,.15);   color: var(--post);   }
+  .PUT    { background: rgba(245,158,11,.15);  color: var(--put);    }
+  .DELETE { background: rgba(239,68,68,.15);   color: var(--delete); }
+
+  .path {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px;
+    flex: 1;
+  }
+  .path .param { color: var(--put); }
+
+  .card-desc { color: var(--muted); font-size: 12px; }
+  .chevron { color: var(--muted); font-size: 11px; margin-left: auto; transition: transform .2s; }
+  .card.open .chevron { transform: rotate(180deg); }
+
+  .card-body {
+    display: none;
+    padding: 0 14px 14px;
+    border-top: 1px solid var(--border);
+  }
+  .card.open .card-body { display: block; }
+
+  /* ── Form fields ────────────────────────────────────── */
+  .fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+    margin: 12px 0 10px;
+  }
+  .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .field input, .field select, .field textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--get); }
+  .field textarea { resize: vertical; min-height: 72px; }
+
+  .run-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
+  /* ── Response ───────────────────────────────────────── */
+  .response {
+    margin-top: 10px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    display: none;
+  }
+  .response.visible { display: block; }
+
+  .res-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    background: var(--bg);
+    font-size: 12px;
+  }
+  .status { font-weight: 700; }
+  .s2xx { color: var(--post); }
+  .s4xx { color: var(--put); }
+  .s5xx { color: var(--delete); }
+  .res-time { color: var(--muted); margin-left: auto; }
+
+  pre.res-body {
+    background: #0a0c12;
+    padding: 12px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px;
+    overflow-x: auto;
+    max-height: 320px;
+    overflow-y: auto;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* JSON syntax colours */
+  .j-key    { color: #93c5fd; }
+  .j-str    { color: #86efac; }
+  .j-num    { color: #fda4af; }
+  .j-bool   { color: #c4b5fd; }
+  .j-null   { color: #94a3b8; }
+
+  /* ── Status bar ─────────────────────────────────────── */
+  #statusBar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 20px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    gap: 16px;
+  }
+  #statusBar span { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .dot.ok  { background: var(--post); }
+  .dot.err { background: var(--delete); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>HabitTracker API Tester</h1>
+  <p class="subtitle">Interactive console for the Cloud Functions REST API</p>
+
+  <!-- ── Config ──────────────────────────────────────────── -->
+  <div class="config">
+    <div class="config-row">
+      <label>Target</label>
+      <select id="targetPreset" onchange="applyPreset()">
+        <option value="emulator">Local emulator</option>
+        <option value="prod">Production</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+    <div class="config-row">
+      <label>Base URL</label>
+      <input id="baseUrl" type="text"
+        value="http://localhost:5001/habittracker-4feb2/us-central1/api"
+        oninput="document.getElementById('targetPreset').value='custom'" />
+    </div>
+    <div class="config-row">
+      <label>Auth token</label>
+      <input id="authToken" type="text" placeholder="Paste Firebase ID token — or click Get Emulator Token" />
+      <button class="btn-primary" onclick="getEmulatorToken()">Get emulator token</button>
+    </div>
+  </div>
+  <p id="authStatus" style="font-size:12px;color:var(--muted);margin-bottom:24px;min-height:18px;"></p>
+
+  <!-- ── Discovery ───────────────────────────────────────── -->
+  <h2>Discovery</h2>
+
+  <div class="card" id="card-routines">
+    <div class="card-header" onclick="toggle('routines')">
+      <span class="badge GET">GET</span>
+      <span class="path">/routines</span>
+      <span class="card-desc">List all routines, sorted by order</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="run-row">
+        <button class="btn-run" onclick="run('routines')">▶ Run</button>
+      </div>
+      <div class="response" id="res-routines"></div>
+    </div>
+  </div>
+
+  <div class="card" id="card-goals">
+    <div class="card-header" onclick="toggle('goals')">
+      <span class="badge GET">GET</span>
+      <span class="path">/goals</span>
+      <span class="card-desc">List goals, optionally filtered by routine</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="fields">
+        <div class="field">
+          <label>routineId <small>(optional)</small></label>
+          <input id="goals-routineId" type="text" placeholder="routine-morning" />
+        </div>
+      </div>
+      <div class="run-row">
+        <button class="btn-run" onclick="run('goals')">▶ Run</button>
+      </div>
+      <div class="response" id="res-goals"></div>
+    </div>
+  </div>
+
+  <!-- ── Entries ──────────────────────────────────────────── -->
+  <h2>Entries</h2>
+
+  <div class="card" id="card-get-entries">
+    <div class="card-header" onclick="toggle('get-entries')">
+      <span class="badge GET">GET</span>
+      <span class="path">/entries</span>
+      <span class="card-desc">Get all entries for a date (defaults to today)</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="fields">
+        <div class="field">
+          <label>date <small>(YYYY-MM-DD, optional)</small></label>
+          <input id="get-entries-date" type="date" />
+        </div>
+      </div>
+      <div class="run-row">
+        <button class="btn-run" onclick="run('get-entries')">▶ Run</button>
+      </div>
+      <div class="response" id="res-get-entries"></div>
+    </div>
+  </div>
+
+  <div class="card" id="card-put-entry">
+    <div class="card-header" onclick="toggle('put-entry')">
+      <span class="badge PUT">PUT</span>
+      <span class="path">/entries/<span class="param">:goalId</span></span>
+      <span class="card-desc">Mark a goal done / failed / clear</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="fields">
+        <div class="field">
+          <label>goalId</label>
+          <input id="put-entry-goalId" type="text" placeholder="goal-meditate" />
+        </div>
+        <div class="field">
+          <label>completed</label>
+          <select id="put-entry-completed">
+            <option value="true">true — done ✓</option>
+            <option value="false">false — failed ✗</option>
+            <option value="null">null — clear ○</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>date <small>(YYYY-MM-DD, optional)</small></label>
+          <input id="put-entry-date" type="date" />
+        </div>
+      </div>
+      <div class="run-row">
+        <button class="btn-run" onclick="run('put-entry')">▶ Run</button>
+      </div>
+      <div class="response" id="res-put-entry"></div>
+    </div>
+  </div>
+
+  <!-- ── Timers ───────────────────────────────────────────── -->
+  <h2>Timers</h2>
+
+  <div class="card" id="card-get-timers">
+    <div class="card-header" onclick="toggle('get-timers')">
+      <span class="badge GET">GET</span>
+      <span class="path">/timers</span>
+      <span class="card-desc">List all currently active timers</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="run-row">
+        <button class="btn-run" onclick="run('get-timers')">▶ Run</button>
+      </div>
+      <div class="response" id="res-get-timers"></div>
+    </div>
+  </div>
+
+  <div class="card" id="card-post-timer">
+    <div class="card-header" onclick="toggle('post-timer')">
+      <span class="badge POST">POST</span>
+      <span class="path">/timers/<span class="param">:targetId</span></span>
+      <span class="card-desc">Start a timer for a goal or routine</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="fields">
+        <div class="field">
+          <label>targetId</label>
+          <input id="post-timer-targetId" type="text" placeholder="goal-meditate" />
+        </div>
+        <div class="field">
+          <label>targetType</label>
+          <select id="post-timer-targetType">
+            <option value="goal">goal</option>
+            <option value="routine">routine</option>
+          </select>
+        </div>
+      </div>
+      <div class="run-row">
+        <button class="btn-run" onclick="run('post-timer')">▶ Run</button>
+      </div>
+      <div class="response" id="res-post-timer"></div>
+    </div>
+  </div>
+
+  <div class="card" id="card-delete-timer">
+    <div class="card-header" onclick="toggle('delete-timer')">
+      <span class="badge DELETE">DELETE</span>
+      <span class="path">/timers/<span class="param">:targetId</span></span>
+      <span class="card-desc">Stop a timer and write the timing segment</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="fields">
+        <div class="field">
+          <label>targetId</label>
+          <input id="delete-timer-targetId" type="text" placeholder="goal-meditate" />
+        </div>
+      </div>
+      <div class="run-row">
+        <button class="btn-run" onclick="run('delete-timer')">▶ Run</button>
+      </div>
+      <div class="response" id="res-delete-timer"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Status bar ───────────────────────────────────────── -->
+<div id="statusBar">
+  <span><span class="dot" id="authDot"></span><span id="authLabel">Not authenticated</span></span>
+  <span id="lastReq" style="margin-left:auto"></span>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────
+const EMULATOR_BASE = 'http://localhost:5001/habittracker-4feb2/us-central1/api';
+const PROD_BASE     = 'https://us-central1-habittracker-4feb2.cloudfunctions.net/api';
+const AUTH_EMULATOR = 'http://localhost:9099';
+const FIREBASE_PROJECT = 'habittracker-4feb2';
+
+function applyPreset() {
+  const p = document.getElementById('targetPreset').value;
+  if (p === 'emulator') document.getElementById('baseUrl').value = EMULATOR_BASE;
+  if (p === 'prod')     document.getElementById('baseUrl').value = PROD_BASE;
+}
+
+function baseUrl() { return document.getElementById('baseUrl').value.replace(/\/$/, ''); }
+function token()   { return document.getElementById('authToken').value.trim(); }
+
+// ── Auth emulator token ──────────────────────────────────────
+async function getEmulatorToken() {
+  setStatus('Signing in via Auth emulator…');
+  try {
+    const res  = await fetch(
+      `${AUTH_EMULATOR}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=emulator-key`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ returnSecureToken: true }) }
+    );
+    const data = await res.json();
+    if (!data.idToken) throw new Error(data.error?.message || 'Unknown error');
+    document.getElementById('authToken').value = data.idToken;
+    setStatus(`Signed in anonymously — uid: ${data.localId}`, true);
+  } catch (e) {
+    setStatus(`Auth emulator error: ${e.message}`, false);
+  }
+}
+
+function setStatus(msg, ok) {
+  document.getElementById('authStatus').textContent = msg;
+  document.getElementById('authStatus').style.color = ok === true
+    ? 'var(--post)' : ok === false ? 'var(--delete)' : 'var(--muted)';
+  const dot = document.getElementById('authDot');
+  dot.className = 'dot' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+  document.getElementById('authLabel').textContent = ok === true ? 'Authenticated' : ok === false ? 'Auth failed' : msg;
+}
+
+// ── Toggle card ──────────────────────────────────────────────
+function toggle(id) {
+  document.getElementById('card-' + id).classList.toggle('open');
+}
+
+// ── JSON syntax highlight ────────────────────────────────────
+function highlight(json) {
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    m => {
+      let cls = 'j-num';
+      if (/^"/.test(m)) cls = /:$/.test(m) ? 'j-key' : 'j-str';
+      else if (/true|false/.test(m)) cls = 'j-bool';
+      else if (/null/.test(m)) cls = 'j-null';
+      return `<span class="${cls}">${m}</span>`;
+    }
+  );
+}
+
+// ── Render response ──────────────────────────────────────────
+function renderResponse(id, status, body, ms) {
+  const el = document.getElementById('res-' + id);
+  el.classList.add('visible');
+
+  const cls = status >= 500 ? 's5xx' : status >= 400 ? 's4xx' : 's2xx';
+  const bodyStr = typeof body === 'object' ? JSON.stringify(body, null, 2) : String(body);
+
+  el.innerHTML = `
+    <div class="res-meta">
+      <span class="status ${cls}">${status}</span>
+      <button class="btn-copy" onclick="copyText(this, ${JSON.stringify(bodyStr)})">Copy</button>
+      <span class="res-time">${ms}ms</span>
+    </div>
+    <pre class="res-body">${highlight(bodyStr)}</pre>
+  `;
+  document.getElementById('lastReq').textContent = `Last: ${status} · ${ms}ms`;
+}
+
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text);
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = 'Copy', 1500);
+}
+
+// ── Core fetch ───────────────────────────────────────────────
+async function apiFetch(method, path, body) {
+  if (!token()) { alert('Paste an auth token first (or click Get emulator token)'); return null; }
+  const opts = {
+    method,
+    headers: { 'Authorization': `Bearer ${token()}`, 'Content-Type': 'application/json' },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const t0  = Date.now();
+  const res = await fetch(baseUrl() + path, opts);
+  const ms  = Date.now() - t0;
+  let json;
+  try { json = await res.json(); } catch { json = await res.text(); }
+  return { status: res.status, body: json, ms };
+}
+
+// ── Endpoint runners ─────────────────────────────────────────
+async function run(id) {
+  const btn = document.querySelector(`#card-${id} .btn-run`);
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    let r;
+    if (id === 'routines') {
+      r = await apiFetch('GET', '/routines');
+
+    } else if (id === 'goals') {
+      const rid = document.getElementById('goals-routineId').value.trim();
+      r = await apiFetch('GET', '/goals' + (rid ? `?routineId=${encodeURIComponent(rid)}` : ''));
+
+    } else if (id === 'get-entries') {
+      const d = document.getElementById('get-entries-date').value;
+      r = await apiFetch('GET', '/entries' + (d ? `?date=${d}` : ''));
+
+    } else if (id === 'put-entry') {
+      const goalId    = document.getElementById('put-entry-goalId').value.trim();
+      const rawVal    = document.getElementById('put-entry-completed').value;
+      const completed = rawVal === 'null' ? null : rawVal === 'true';
+      const d         = document.getElementById('put-entry-date').value;
+      if (!goalId) { alert('goalId is required'); return; }
+      r = await apiFetch('PUT', `/entries/${encodeURIComponent(goalId)}` + (d ? `?date=${d}` : ''), { completed });
+
+    } else if (id === 'get-timers') {
+      r = await apiFetch('GET', '/timers');
+
+    } else if (id === 'post-timer') {
+      const targetId   = document.getElementById('post-timer-targetId').value.trim();
+      const targetType = document.getElementById('post-timer-targetType').value;
+      if (!targetId) { alert('targetId is required'); return; }
+      r = await apiFetch('POST', `/timers/${encodeURIComponent(targetId)}`, { targetType });
+
+    } else if (id === 'delete-timer') {
+      const targetId = document.getElementById('delete-timer-targetId').value.trim();
+      if (!targetId) { alert('targetId is required'); return; }
+      r = await apiFetch('DELETE', `/timers/${encodeURIComponent(targetId)}`);
+    }
+
+    if (r) renderResponse(id, r.status, r.body, r.ms);
+  } catch (e) {
+    renderResponse(id, 0, { error: e.message, hint: 'Is the emulator running?' }, 0);
+  } finally {
+    btn.textContent = '▶ Run';
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
