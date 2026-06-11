@@ -36,18 +36,23 @@ Requires a Firebase project with Firestore and Auth enabled. Config lives in `sr
 
 ## Deploying
 
-**Web app → GitHub Pages**
-```bash
-npm run deploy
-```
-Builds the Expo web export (`dist/`) and force-pushes it to the `gh-pages` branch. Run this whenever you want the live site to reflect `main`.
+After merging to `main`, run:
 
-**Cloud Functions → Firebase**
 ```bash
-cd functions && npm install && npm run build && cd ..
-firebase deploy --only functions
+npm run ship
 ```
-Requires the Firebase CLI (`npm install -g firebase-tools`) and `firebase login`. Needs the Blaze billing plan on your Firebase project.
+
+This does everything in order:
+1. Installs & compiles the Cloud Functions TypeScript
+2. Deploys functions to Firebase (`us-central1-habittracker-4feb2.cloudfunctions.net/api`)
+3. Builds the Expo web export and pushes it to `gh-pages`
+
+**Prerequisites (one-time setup):**
+```bash
+npm install -g firebase-tools
+firebase login
+```
+Also requires the Blaze billing plan on the Firebase project (needed to deploy functions).
 
 ## Project Structure
 
