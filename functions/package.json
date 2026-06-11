@@ -2,7 +2,7 @@
   "name": "habittracker-functions",
   "scripts": {
     "build": "tsc",
-    "serve": "npm run build && firebase emulators:start --only functions",
+    "serve": "npm run build && firebase emulators:start --only auth,functions,firestore",
     "deploy": "firebase deploy --only functions"
   },
   "engines": {
