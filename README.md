@@ -34,6 +34,21 @@ npx expo start          # Expo dev server
 
 Requires a Firebase project with Firestore and Auth enabled. Config lives in `src/services/firebase.ts`.
 
+## Deploying
+
+**Web app → GitHub Pages**
+```bash
+npm run deploy
+```
+Builds the Expo web export (`dist/`) and force-pushes it to the `gh-pages` branch. Run this whenever you want the live site to reflect `main`.
+
+**Cloud Functions → Firebase**
+```bash
+cd functions && npm install && npm run build && cd ..
+firebase deploy --only functions
+```
+Requires the Firebase CLI (`npm install -g firebase-tools`) and `firebase login`. Needs the Blaze billing plan on your Firebase project.
+
 ## Project Structure
 
 ```
