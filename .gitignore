@@ -41,3 +41,8 @@ yarn-error.*
 
 # Cloud Functions build output
 functions/lib/
+
+# Firebase emulator logs
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
