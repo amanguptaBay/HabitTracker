@@ -8,7 +8,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "predeploy": "expo export -p web",
-    "deploy": "gh-pages --nojekyll -d dist"
+    "deploy": "gh-pages --nojekyll -d dist",
+    "ship": "npm --prefix functions install && npm --prefix functions run build && firebase deploy --only functions && npm run deploy"
   },
   "dependencies": {
     "@expo/cli": "^55.0.18",

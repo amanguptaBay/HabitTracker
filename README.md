@@ -34,6 +34,26 @@ npx expo start          # Expo dev server
 
 Requires a Firebase project with Firestore and Auth enabled. Config lives in `src/services/firebase.ts`.
 
+## Deploying
+
+After merging to `main`, run:
+
+```bash
+npm run ship
+```
+
+This does everything in order:
+1. Installs & compiles the Cloud Functions TypeScript
+2. Deploys functions to Firebase (`us-central1-habittracker-4feb2.cloudfunctions.net/api`)
+3. Builds the Expo web export and pushes it to `gh-pages`
+
+**Prerequisites (one-time setup):**
+```bash
+npm install -g firebase-tools
+firebase login
+```
+Also requires the Blaze billing plan on the Firebase project (needed to deploy functions).
+
 ## Project Structure
 
 ```
