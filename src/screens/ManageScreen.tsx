@@ -29,7 +29,7 @@ function uid7() {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ManageScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const {
     routines, goals,
     addRoutine, updateRoutine, deleteRoutine, reorderAll,
@@ -242,6 +242,13 @@ export default function ManageScreen() {
             <DayStartSetting />
 
             <Pressable
+              style={styles.debugBtn}
+              onPress={() => navigation.navigate('Debug')}
+            >
+              <Text style={styles.debugText}>⚙ API Debug</Text>
+            </Pressable>
+
+            <Pressable
               style={styles.signOutBtn}
               onPress={() => signOut()}
             >
@@ -433,6 +440,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#888',
+  },
+  debugBtn: {
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#b0bec5',
+    backgroundColor: '#f5f5f5',
+  },
+  debugText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#546e7a',
   },
   signOutBtn: {
     padding: 16,
