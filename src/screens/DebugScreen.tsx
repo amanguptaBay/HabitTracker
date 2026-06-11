@@ -32,6 +32,12 @@ const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'mon
 const EMULATOR_BASE = 'http://localhost:5001/habittracker-4feb2/us-central1/api';
 const PROD_BASE     = 'https://us-central1-habittracker-4feb2.cloudfunctions.net/api';
 
+const isLocalhost = typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const DEFAULT_TARGET: 'emulator' | 'prod' = isLocalhost ? 'emulator' : 'prod';
+const DEFAULT_BASE   = isLocalhost ? EMULATOR_BASE : PROD_BASE;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -188,8 +194,8 @@ function EndpointCard({
 
 export default function DebugScreen() {
   const navigation = useNavigation();
-  const [baseUrl, setBaseUrl] = useState(EMULATOR_BASE);
-  const [target, setTarget]   = useState<'emulator' | 'prod'>('emulator');
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE);
+  const [target, setTarget]   = useState<'emulator' | 'prod'>(DEFAULT_TARGET);
 
   const setTarget_ = (t: 'emulator' | 'prod') => {
     setTarget(t);
