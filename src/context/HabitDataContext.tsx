@@ -2,10 +2,10 @@
  * HabitDataContext
  *
  * Single source of truth for all habit data.
- * - Auth   : Firebase auth state drives uid
- * - Remote : Firestore real-time listeners (onSnapshot) populate all state
- * - Writes : all mutations write to Firestore; listeners reflect changes back
- * - Timers : activeTimers persisted in Firestore — syncs across devices/tabs
+ * - Auth   : Supabase auth state drives uid
+ * - Remote : Supabase realtime listeners (Postgres CDC) populate all state
+ * - Writes : all mutations write to Supabase; listeners reflect changes back
+ * - Timers : activeTimers persisted in Supabase — syncs across devices/tabs
  */
 
 import React, {
@@ -17,7 +17,7 @@ import React, {
   useRef,
 } from 'react';
 import { Goal, Routine, Entry, TimingSegment, ActiveTimer, UserSettings, DEFAULT_SETTINGS } from '../types'; // TimingSegment used in state type
-import { subscribeToAuth } from '../services/auth';
+import { subscribeToAuth } from '../services/supabase/auth';
 import {
   listenRoutines,
   listenGoals,
@@ -38,7 +38,7 @@ import {
   updateGoalOrder,
   upsertEntry,
   upsertTimingSegment,
-} from '../services/firestoreService';
+} from '../services/supabase/dataService';
 import { getLogicalDate, splitByLogicalDay } from '../utils/date';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -132,13 +132,13 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = subscribeToAuth((user) => {
-      setUid(user?.uid ?? null);
+      setUid(user?.id ?? null);
       if (!user) setLoading(false); // not signed in — nothing to load
     });
     return unsub;
   }, []);
 
-  // ── Firestore listeners ───────────────────────────────────────────────────
+  // ── Supabase listeners ────────────────────────────────────────────────────
   useEffect(() => {
     if (!uid) return;
 
@@ -146,12 +146,12 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     // Entry/segment listeners re-attach when logicalToday changes (see next effect).
     const unsubs = [
       listenSettings(uid, (s) => setSettings(s)),
-      listenRoutines(uid, (data) => {
+      listenRoutines((data) => {
         setRoutines(data.slice().sort((a, b) => a.order - b.order));
         setLoading(false);
       }),
-      listenGoals(uid, setGoals),
-      listenActiveTimers(uid, setActiveTimers),
+      listenGoals(setGoals),
+      listenActiveTimers(setActiveTimers),
     ];
 
     return () => unsubs.forEach((u) => u());
@@ -181,8 +181,8 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
 
   const deleteRoutine = useCallback(async (routine: Routine) => {
     if (!uid) return;
-    await removeRoutine(uid, routine, goals);
-  }, [uid, goals]);
+    await removeRoutine(uid, routine);
+  }, [uid]);
 
   const reorderAll = useCallback(async (updated: Routine[]) => {
     if (!uid) return;
@@ -284,11 +284,10 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     await saveSettings(uid, next);
   }, [uid]);
 
-  // ── Timer mutations — Firestore-backed ───────────────────────────────────
+  // ── Timer mutations — Supabase-backed ────────────────────────────────────
 
   const startTimer = useCallback(async (targetId: string, targetType: 'goal' | 'routine') => {
     if (!uid) return;
-    // Writing to Firestore triggers onSnapshot → setActiveTimers automatically
     await startActiveTimer(uid, { targetId, targetType, startedAt: nowIso() });
   }, [uid]);
 
@@ -301,7 +300,6 @@ export function HabitDataProvider({ children }: { children: React.ReactNode }) {
     const endTime = nowIso();
     const { timezone } = settingsRef.current;
 
-    // Delete from Firestore first — onSnapshot clears it from UI immediately
     await stopActiveTimer(uid, targetId);
 
     // Split across midnight boundaries (usually just one chunk)

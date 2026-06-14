@@ -11,7 +11,7 @@ import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-nativ
 import { GestureHandlerRootView, TouchableOpacity } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
 import { useHabitData } from '../context/HabitDataContext';
-import { signOut } from '../services/auth';
+import { signOut } from '../services/supabase/auth';
 import DayStartSetting from '../components/DayStartSetting';
 import { Goal, Routine } from '../types';
 import RoutineModal from '../components/manage/RoutineModal';
@@ -137,11 +137,8 @@ export default function ManageScreen() {
         });
         if (!anyMoved) {
           // Pure reorder within same routine
-          const { updateGoalOrder } = await import('../services/firestoreService');
-          const { auth } = await import('../services/firebase');
-          if (auth.currentUser) {
-            await updateGoalOrder(auth.currentUser.uid, rId, goalIds);
-          }
+          const { updateGoalOrder } = await import('../services/supabase/dataService');
+          await updateGoalOrder('', rId, goalIds);
         }
       }
     }

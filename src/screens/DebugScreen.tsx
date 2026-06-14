@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { auth } from '../services/firebase';
+import { supabase } from '../services/supabase/client';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -45,7 +45,8 @@ async function apiFetch(
   path: string,
   body?: unknown,
 ): Promise<ApiResponse> {
-  const token = await auth.currentUser?.getIdToken();
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
   if (!token) throw new Error('Not signed in');
 
   const opts: RequestInit = {

@@ -4,9 +4,9 @@ import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { User } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
 import { HabitDataProvider } from './src/context/HabitDataContext';
-import { subscribeToAuth } from './src/services/auth';
+import { subscribeToAuth } from './src/services/supabase/auth';
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ManageScreen from './src/screens/ManageScreen';
@@ -26,7 +26,7 @@ export default function App() {
     });
   }, []);
 
-  // Splash — waiting for Firebase to restore auth state
+  // Splash — waiting for Supabase to restore auth state
   if (authLoading) {
     return (
       <View style={styles.splash}>
